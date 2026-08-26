@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Sala - Screen Share</title>
+
+    <link
+        rel="stylesheet"
+        href="/static/style.css"
+    >
+</head>
+
+<body>
+
+<main class="container">
+
+    <h1>Screen Share</h1>
+
+    <div id="entrada">
+
+        <h2>Entrar na sala</h2>
+
+        <input
+            id="nome"
+            type="text"
+            placeholder="Seu nome"
+        >
+
+        <button id="entrar">
+            Entrar
+        </button>
+
+    </div>
+
+
+    <div
+        id="painel"
+        style="display: none;"
+    >
+
+        <p id="codigo-sala"></p>
+
+        <button id="copiar-link">
+            Copiar convite
+        </button>
+
+
+        <p id="status">
+            Conectado
+        </p>
+
+
+        <button id="transmitir">
+            Iniciar transmissão
+        </button>
+
+        <button
+            id="parar"
+            style="display: none;"
+        >
+            Parar transmissão
+        </button>
+
+
+        <h2>Usuários online</h2>
+
+        <div id="usuarios-online">
+        </div>
+
+
+        <h2>Transmissões ativas</h2>
+
+        <div id="transmissoes">
+            Nenhuma transmissão ativa.
+        </div>
+
+
+        <h2>Vídeo</h2>
+
+        <video
+            id="video"
+            autoplay
+            playsinline
+            controls
+        ></video>
+
+    </div>
+
+</main>
+
+<script src="/static/app.js"></script>
+
+</body>
+
+</html>

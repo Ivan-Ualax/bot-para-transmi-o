@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Screen Share</title>
+
+    <link
+        rel="stylesheet"
+        href="/static/style.css"
+    >
+</head>
+
+<body>
+
+    <main class="container">
+
+        <h1>Screen Share</h1>
+
+        <p>
+            Crie uma sala e envie o link para seus amigos.
+        </p>
+
+        <button id="criar-sala">
+            Criar sala
+        </button>
+
+    </main>
+
+
+    <script>
+        const botao = document.getElementById("criar-sala");
+
+        botao.addEventListener("click", async () => {
+
+            const resposta = await fetch(
+                "/criar-sala",
+                {
+                    method: "POST"
+                }
+            );
+
+            const dados = await resposta.json();
+
+            window.location.href = dados.url;
+        });
+    </script>
+
+</body>
+
+</html>
