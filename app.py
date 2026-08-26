@@ -6,18 +6,9 @@ import string
 import urllib.request
 import urllib.error
 
-from fastapi import (
-    FastAPI,
-    WebSocket,
-    WebSocketDisconnect,
-)
-
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-
-from fastapi.responses import (
-    FileResponse,
-    JSONResponse,
-)
+from fastapi.responses import FileResponse, JSONResponse
 
 
 app = FastAPI()
@@ -42,10 +33,6 @@ async def turn_credentials():
 
     if not turn_key_id or not turn_api_token:
 
-        print(
-            "Cloudflare TURN não configurado."
-        )
-
         return JSONResponse(
             status_code=500,
             content={
@@ -63,9 +50,7 @@ async def turn_credentials():
 
     corpo = json.dumps({
         "ttl": 86400
-    }).encode(
-        "utf-8"
-    )
+    }).encode("utf-8")
 
     requisicao = urllib.request.Request(
         url,
@@ -79,7 +64,10 @@ async def turn_credentials():
                 "application/json",
 
             "Accept":
-                "application/json"
+                "application/json",
+
+            "User-Agent":
+                "Mozilla/5.0"
         }
     )
 
@@ -90,16 +78,10 @@ async def turn_credentials():
             timeout=10
         ) as resposta:
 
-            corpo_resposta = (
+            dados = json.loads(
                 resposta
                 .read()
-                .decode(
-                    "utf-8"
-                )
-            )
-
-            dados = json.loads(
-                corpo_resposta
+                .decode("utf-8")
             )
 
             print(
@@ -112,20 +94,14 @@ async def turn_credentials():
 
     except urllib.error.HTTPError as erro:
 
-        try:
-
-            detalhe = (
-                erro
-                .read()
-                .decode(
-                    "utf-8",
-                    errors="ignore"
-                )
+        detalhe = (
+            erro
+            .read()
+            .decode(
+                "utf-8",
+                errors="ignore"
             )
-
-        except Exception:
-
-            detalhe = ""
+        )
 
         print(
             "Cloudflare HTTP ERROR:",
@@ -182,9 +158,7 @@ async def turn_credentials():
 # GERAR CÓDIGO DA SALA
 # ======================================================
 
-def gerar_codigo_sala(
-    tamanho=6
-):
+def gerar_codigo_sala(tamanho=6):
 
     caracteres = (
         string.ascii_uppercase +
@@ -221,31 +195,21 @@ async def criar_sala():
     codigo = gerar_codigo_sala()
 
     while codigo in salas:
-
         codigo = gerar_codigo_sala()
 
     salas[codigo] = {
-
         "usuarios": {},
-
         "transmissoes": {}
-
     }
 
     print(
         f"Sala criada: {codigo}"
     )
 
-    return JSONResponse(
-        content={
-
-            "codigo":
-                codigo,
-
-            "url":
-                f"/sala/{codigo}"
-        }
-    )
+    return JSONResponse({
+        "codigo": codigo,
+        "url": f"/sala/{codigo}"
+    })
 
 
 # ======================================================
@@ -262,11 +226,8 @@ async def abrir_sala(
     if codigo not in salas:
 
         salas[codigo] = {
-
             "usuarios": {},
-
             "transmissoes": {}
-
         }
 
         print(
@@ -291,38 +252,23 @@ async def enviar_estado_sala(
     )
 
     if not sala:
-
         return
 
     estado = {
-
-        "tipo":
-            "estado",
+        "tipo": "estado",
 
         "usuarios": [
-
             {
-
-                "id":
-                    usuario_id,
-
-                "nome":
-                    dados["nome"]
-
+                "id": usuario_id,
+                "nome": dados["nome"]
             }
-
             for usuario_id, dados
             in sala["usuarios"].items()
-
         ],
 
         "transmissoes": [
-
             {
-
-                "usuario_id":
-                    usuario_id,
-
+                "usuario_id": usuario_id,
                 "nome":
                     sala[
                         "usuarios"
@@ -331,23 +277,15 @@ async def enviar_estado_sala(
                     ][
                         "nome"
                     ]
-
             }
-
             for usuario_id
             in sala["transmissoes"]
-
-            if usuario_id
-            in sala["usuarios"]
-
+            if usuario_id in sala["usuarios"]
         ]
-
     }
 
     for dados in list(
-        sala[
-            "usuarios"
-        ].values()
+        sala["usuarios"].values()
     ):
 
         try:
@@ -372,11 +310,8 @@ async def enviar_estado_sala(
 
 @app.websocket("/ws/{codigo}")
 async def websocket_sala(
-
     websocket: WebSocket,
-
     codigo: str
-
 ):
 
     codigo = codigo.upper()
@@ -386,11 +321,8 @@ async def websocket_sala(
     if codigo not in salas:
 
         salas[codigo] = {
-
             "usuarios": {},
-
             "transmissoes": {}
-
         }
 
     usuario_id = str(
@@ -418,13 +350,8 @@ async def websocket_sala(
         if not nome:
 
             await websocket.send_json({
-
-                "tipo":
-                    "erro",
-
-                "mensagem":
-                    "Nome obrigatório."
-
+                "tipo": "erro",
+                "mensagem": "Nome obrigatório."
             })
 
             await websocket.close()
@@ -438,38 +365,17 @@ async def websocket_sala(
         ][
             usuario_id
         ] = {
-
-            "nome":
-                nome,
-
-            "socket":
-                websocket
-
+            "nome": nome,
+            "socket": websocket
         }
 
         await websocket.send_json({
-
-            "tipo":
-                "meu_id",
-
-            "id":
-                usuario_id
-
+            "tipo": "meu_id",
+            "id": usuario_id
         })
 
         print(
             f"{nome} entrou na sala {codigo}"
-        )
-
-        print(
-            "Usuários conectados:",
-            len(
-                salas[
-                    codigo
-                ][
-                    "usuarios"
-                ]
-            )
         )
 
         await enviar_estado_sala(
@@ -491,24 +397,11 @@ async def websocket_sala(
                 f"{nome} enviou evento: {tipo}"
             )
 
-
-            # ==================================================
-            # HEARTBEAT
-            # ==================================================
-
             if tipo == "ping":
 
                 await websocket.send_json({
-
-                    "tipo":
-                        "pong"
-
+                    "tipo": "pong"
                 })
-
-
-            # ==================================================
-            # INICIAR TRANSMISSÃO
-            # ==================================================
 
             elif tipo == "iniciar_transmissao":
 
@@ -520,18 +413,9 @@ async def websocket_sala(
                     usuario_id
                 ] = True
 
-                print(
-                    f"{nome} iniciou transmissão"
-                )
-
                 await enviar_estado_sala(
                     codigo
                 )
-
-
-            # ==================================================
-            # PARAR TRANSMISSÃO
-            # ==================================================
 
             elif tipo == "parar_transmissao":
 
@@ -544,18 +428,9 @@ async def websocket_sala(
                     None
                 )
 
-                print(
-                    f"{nome} encerrou transmissão"
-                )
-
                 await enviar_estado_sala(
                     codigo
                 )
-
-
-            # ==================================================
-            # ASSISTIR TRANSMISSÃO
-            # ==================================================
 
             elif tipo == "assistir":
 
@@ -563,11 +438,6 @@ async def websocket_sala(
                     mensagem.get(
                         "transmissor_id"
                     )
-                )
-
-                print(
-                    f"{nome} quer assistir "
-                    f"{transmissor_id}"
                 )
 
                 if (
@@ -579,10 +449,6 @@ async def websocket_sala(
                     ]
                 ):
 
-                    print(
-                        "Transmissor encontrado!"
-                    )
-
                     await salas[
                         codigo
                     ][
@@ -592,50 +458,23 @@ async def websocket_sala(
                     ][
                         "socket"
                     ].send_json({
-
                         "tipo":
                             "novo_espectador",
 
                         "espectador_id":
                             usuario_id
-
                     })
 
-                    print(
-                        "Pedido enviado ao transmissor!"
-                    )
-
-                else:
-
-                    print(
-                        "ERRO: transmissor não encontrado"
-                    )
-
-
-            # ==================================================
-            # WEBRTC
-            # OFFER / ANSWER / ICE
-            # ==================================================
-
             elif tipo in [
-
                 "offer",
-
                 "answer",
-
                 "ice"
-
             ]:
 
                 destino = (
                     mensagem.get(
                         "destino"
                     )
-                )
-
-                print(
-                    f"{nome} enviou "
-                    f"{tipo} para {destino}"
                 )
 
                 if (
@@ -663,30 +502,17 @@ async def websocket_sala(
                         mensagem
                     )
 
-                    print(
-                        f"{tipo} encaminhado!"
-                    )
-
-                else:
-
-                    print(
-                        f"Destino não encontrado: {destino}"
-                    )
-
             else:
 
                 print(
                     f"Evento desconhecido: {tipo}"
                 )
 
-
     except WebSocketDisconnect:
 
         print(
-            f"{nome} desconectou "
-            f"da sala {codigo}"
+            f"{nome} desconectou da sala {codigo}"
         )
-
 
     except Exception as erro:
 
@@ -694,7 +520,6 @@ async def websocket_sala(
             "ERRO NO WEBSOCKET:",
             repr(erro)
         )
-
 
     finally:
 
@@ -718,21 +543,6 @@ async def websocket_sala(
                 None
             )
 
-            print(
-                f"{nome} removido da sala {codigo}"
-            )
-
-            print(
-                "Usuários restantes:",
-                len(
-                    salas[
-                        codigo
-                    ][
-                        "usuarios"
-                    ]
-                )
-            )
-
             await enviar_estado_sala(
                 codigo
             )
@@ -743,13 +553,9 @@ async def websocket_sala(
 # ======================================================
 
 app.mount(
-
     "/static",
-
     StaticFiles(
         directory="static"
     ),
-
     name="static"
-
 )
