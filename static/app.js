@@ -99,14 +99,15 @@ const icePendentes = {};
 // Não compartilhe a nova credencial publicamente.
 //
 
+// ======================================================
+// TURN - METERED
+// ======================================================
+
 const TURN_USERNAME =
-
- "713568c33df25731fe8641aa";
-
-
+    "713568c33df25731fe8641aa";
 
 const TURN_CREDENTIAL =
- "bgZWM4k7aXiBuZ3i";
+    "bgZWM4k7aXiBuZ3i";
 
 
 // ======================================================
@@ -118,18 +119,15 @@ const configuracaoRTC = {
     iceServers: [
 
         // STUN
-
         {
             urls:
                 "stun:stun.relay.metered.ca:80"
         },
 
-
-        // TURN UDP / padrão
-
+        // TURN UDP
         {
             urls:
-                "turn:global.relay.metered.ca:80",
+                "turn:br.relay.metered.ca:80",
 
             username:
                 TURN_USERNAME,
@@ -137,13 +135,11 @@ const configuracaoRTC = {
             credential:
                 TURN_CREDENTIAL
         },
-
 
         // TURN TCP
-
         {
             urls:
-                "turn:global.relay.metered.ca:80?transport=tcp",
+                "turn:br.relay.metered.ca:80?transport=tcp",
 
             username:
                 TURN_USERNAME,
@@ -152,12 +148,10 @@ const configuracaoRTC = {
                 TURN_CREDENTIAL
         },
 
-
-        // TURN porta 443
-
+        // TURN 443
         {
             urls:
-                "turn:global.relay.metered.ca:443",
+                "turn:br.relay.metered.ca:443",
 
             username:
                 TURN_USERNAME,
@@ -165,13 +159,11 @@ const configuracaoRTC = {
             credential:
                 TURN_CREDENTIAL
         },
-
 
         // TURN TLS
-
         {
             urls:
-                "turns:global.relay.metered.ca:443?transport=tcp",
+                "turns:br.relay.metered.ca:443?transport=tcp",
 
             username:
                 TURN_USERNAME,
@@ -182,17 +174,7 @@ const configuracaoRTC = {
 
     ],
 
-
-    // ==================================================
-    // TESTE TURN
-    // ==================================================
-    //
-    // "relay" força TURN.
-    //
-    // Quando o TURN estiver confirmado,
-    // depois podemos voltar para "all".
-    //
-
+    // Força o uso do TURN durante o teste
     iceTransportPolicy:
         "relay",
 
