@@ -1,7 +1,7 @@
 import os
 
-import discord
 import aiohttp
+import discord
 
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -38,7 +38,7 @@ async def on_ready():
     except Exception as erro:
         print(
             "Erro ao sincronizar comandos:",
-            erro
+            repr(erro)
         )
 
 
@@ -49,24 +49,72 @@ async def on_ready():
 async def criar_sala(
     interaction: discord.Interaction
 ):
+    # Responde ao Discord imediatamente
     await interaction.response.defer()
 
     try:
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(
+            total=15
+        )
+
+        async with aiohttp.ClientSession(
+            timeout=timeout
+        ) as session:
+
+            url = f"{BASE_URL}/criar-sala"
+
+            print(
+                "Chamando:",
+                url
+            )
 
             async with session.post(
-                f"{BASE_URL}/criar-sala"
+                url
             ) as resposta:
 
+                print(
+                    "STATUS VERCEL:",
+                    resposta.status
+                )
+
+                texto = await resposta.text()
+
+                print(
+                    "RESPOSTA VERCEL:",
+                    texto
+                )
+
                 if resposta.status != 200:
+
                     await interaction.followup.send(
-                        "Não foi possível criar a sala."
+                        f"❌ Não foi possível criar a sala. "
+                        f"Status: {resposta.status}"
                     )
+
                     return
 
-                dados = await resposta.json()
+                try:
+                    dados = await resposta.json()
 
-                codigo = dados["codigo"]
+                except Exception:
+                    await interaction.followup.send(
+                        "❌ A Vercel respondeu, "
+                        "mas a resposta não veio em JSON."
+                    )
+
+                    return
+
+                codigo = dados.get(
+                    "codigo"
+                )
+
+                if not codigo:
+
+                    await interaction.followup.send(
+                        "❌ A sala não retornou um código válido."
+                    )
+
+                    return
 
                 link = (
                     f"{BASE_URL}/sala/{codigo}"
@@ -74,8 +122,9 @@ async def criar_sala(
 
                 mensagem = (
                     "🎥 **Sala criada!**\n\n"
-                    f"**Código:** `{codigo}`\n"
-                    f"**Entrar na sala:**\n{link}\n\n"
+                    f"**Código:** `{codigo}`\n\n"
+                    f"**Entrar na sala:**\n"
+                    f"{link}\n\n"
                     "Qualquer pessoa com o link "
                     "pode entrar, assistir ou transmitir."
                 )
@@ -84,16 +133,29 @@ async def criar_sala(
                     mensagem
                 )
 
-    except Exception as erro:
+
+    except aiohttp.ClientError as erro:
 
         print(
-            "Erro ao criar sala:",
-            erro
+            "ERRO HTTP:",
+            repr(erro)
         )
 
         await interaction.followup.send(
-            "Ocorreu um erro ao conectar "
-            "com o Screen Share."
+            "❌ Não consegui conectar "
+            "ao Screen Share."
+        )
+
+
+    except Exception as erro:
+
+        print(
+            "ERRO CRIAR SALA:",
+            repr(erro)
+        )
+
+        await interaction.followup.send(
+            "❌ Ocorreu um erro ao criar a sala."
         )
 
 

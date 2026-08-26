@@ -2,6 +2,8 @@ import os
 import uuid
 import random
 import string
+import asyncio
+from contextlib import suppress
 
 from fastapi import (
     FastAPI,
@@ -16,11 +18,11 @@ from fastapi.responses import (
     JSONResponse,
 )
 
-from upstash_redis import Redis
+from upstash_redis.asyncio import Redis
 
 
 # =========================================================
-# APLICAÇÃO
+# APP
 # =========================================================
 
 app = FastAPI()
@@ -30,19 +32,25 @@ app = FastAPI()
 # REDIS
 # =========================================================
 
-REDIS_URL = os.getenv("gQAAAAAAArbjAAIgcDJmNjQyNDE0NTA3NmE0Nzk0ODY2N2FlYTg2MDgzNzUzYg")
-REDIS_TOKEN = os.getenv("KV_REST_API_TOKEN")
+REDIS_URL = os.getenv(
+    "KV_REST_API_URL"
+)
+
+REDIS_TOKEN = os.getenv(
+    "KV_REST_API_TOKEN"
+)
 
 
 if not REDIS_URL or not REDIS_TOKEN:
-    print(
-        "AVISO: KV_REST_API_URL ou "
-        "KV_REST_API_TOKEN não encontrados."
-    )
 
     redis = None
 
+    print(
+        "ERRO: Redis não configurado."
+    )
+
 else:
+
     redis = Redis(
         url=REDIS_URL,
         token=REDIS_TOKEN,
@@ -57,34 +65,65 @@ TEMPO_SALA = 21600
 # 6 horas
 
 TEMPO_USUARIO = 120
-# usuário é considerado ativo por até 2 minutos
+# 2 minutos
+
+TEMPO_FILA = 300
+# mensagens de sinalização:
+# 5 minutos
 
 
 # =========================================================
-# SOCKETS LOCAIS
-# =========================================================
-#
-# IMPORTANTE:
-#
-# O WebSocket não pode ser salvo no Redis.
-#
-# Aqui ficam somente os WebSockets conectados
-# à instância atual.
-#
-# Estrutura:
-#
-# sockets_locais[codigo][usuario_id] = websocket
-#
+# CHAVES REDIS
 # =========================================================
 
-sockets_locais = {}
+def chave_sala(codigo):
+
+    return f"sala:{codigo}"
+
+
+def chave_usuarios(codigo):
+
+    return (
+        f"sala:{codigo}:usuarios"
+    )
+
+
+def chave_transmissoes(codigo):
+
+    return (
+        f"sala:{codigo}:transmissoes"
+    )
+
+
+def chave_ativo(
+    codigo,
+    usuario_id,
+):
+
+    return (
+        f"sala:{codigo}:ativo:"
+        f"{usuario_id}"
+    )
+
+
+def chave_fila(
+    codigo,
+    usuario_id,
+):
+
+    return (
+        f"sala:{codigo}:fila:"
+        f"{usuario_id}"
+    )
 
 
 # =========================================================
-# FUNÇÕES AUXILIARES
+# GERAR CÓDIGO
 # =========================================================
 
-def gerar_codigo_sala(tamanho=6):
+def gerar_codigo_sala(
+    tamanho=6
+):
 
     caracteres = (
         string.ascii_uppercase
@@ -99,65 +138,53 @@ def gerar_codigo_sala(tamanho=6):
     )
 
 
-def chave_sala(codigo):
-
-    return f"sala:{codigo}"
-
-
-def chave_usuarios(codigo):
-
-    return f"sala:{codigo}:usuarios"
-
-
-def chave_transmissoes(codigo):
-
-    return f"sala:{codigo}:transmissoes"
-
-
-def chave_usuario_ativo(
-    codigo,
-    usuario_id,
-):
-
-    return (
-        f"sala:{codigo}:ativo:"
-        f"{usuario_id}"
-    )
-
+# =========================================================
+# REDIS DISPONÍVEL
+# =========================================================
 
 def redis_disponivel():
 
     return redis is not None
 
 
-def sala_existe(codigo):
+# =========================================================
+# SALA EXISTE
+# =========================================================
+
+async def sala_existe(codigo):
 
     if not redis_disponivel():
+
         return False
 
-    return bool(
-        redis.exists(
-            chave_sala(codigo)
-        )
+    resultado = await redis.exists(
+        chave_sala(codigo)
     )
 
+    return bool(resultado)
 
-def renovar_sala(codigo):
+
+# =========================================================
+# RENOVAR SALA
+# =========================================================
+
+async def renovar_sala(codigo):
 
     if not redis_disponivel():
+
         return
 
-    redis.expire(
+    await redis.expire(
         chave_sala(codigo),
         TEMPO_SALA,
     )
 
-    redis.expire(
+    await redis.expire(
         chave_usuarios(codigo),
         TEMPO_SALA,
     )
 
-    redis.expire(
+    await redis.expire(
         chave_transmissoes(codigo),
         TEMPO_SALA,
     )
@@ -187,31 +214,35 @@ async def criar_sala():
         return JSONResponse(
             {
                 "erro":
-                    "Redis não configurado."
+                    "Redis indisponível"
             },
             status_code=500,
         )
 
     codigo = gerar_codigo_sala()
 
-    while sala_existe(codigo):
+    while await sala_existe(
+        codigo
+    ):
 
         codigo = gerar_codigo_sala()
 
-    redis.set(
+    await redis.set(
         chave_sala(codigo),
         "1",
         ex=TEMPO_SALA,
     )
 
     print(
-        f"Sala criada no Redis: {codigo}"
+        f"SALA CRIADA: {codigo}"
     )
 
     return JSONResponse(
         {
             "codigo": codigo,
-            "url": f"/sala/{codigo}",
+
+            "url":
+                f"/sala/{codigo}",
         }
     )
 
@@ -232,28 +263,23 @@ async def abrir_sala(
         return JSONResponse(
             {
                 "erro":
-                    "Redis não configurado."
+                    "Redis indisponível"
             },
             status_code=500,
         )
 
-    if not sala_existe(codigo):
-
-        print(
-            f"Tentativa de abrir sala "
-            f"inexistente: {codigo}"
-        )
-
-        # Se você ainda não criou
-        # sala_inexistente.html,
-        # usamos o index por enquanto.
+    if not await sala_existe(
+        codigo
+    ):
 
         return FileResponse(
             "static/index.html",
             status_code=404,
         )
 
-    renovar_sala(codigo)
+    await renovar_sala(
+        codigo
+    )
 
     return FileResponse(
         "static/sala.html"
@@ -261,91 +287,101 @@ async def abrir_sala(
 
 
 # =========================================================
-# OBTER USUÁRIOS
+# USUÁRIOS ATIVOS
 # =========================================================
 
-def obter_usuarios(codigo):
-
-    if not redis_disponivel():
-        return {}
+async def obter_usuarios(
+    codigo
+):
 
     usuarios = (
-        redis.hgetall(
+        await redis.hgetall(
             chave_usuarios(codigo)
         )
         or {}
     )
 
-    usuarios_validos = {}
+    ativos = {}
 
-    for usuario_id, nome in usuarios.items():
+    for (
+        usuario_id,
+        nome
+    ) in usuarios.items():
 
-        ativo = redis.exists(
-            chave_usuario_ativo(
+        existe = await redis.exists(
+            chave_ativo(
                 codigo,
                 usuario_id,
             )
         )
 
-        if ativo:
+        if existe:
 
-            usuarios_validos[
+            ativos[
                 usuario_id
             ] = nome
 
         else:
 
-            # Remove usuário fantasma
-
-            redis.hdel(
+            await redis.hdel(
                 chave_usuarios(codigo),
                 usuario_id,
             )
 
-            redis.hdel(
+            await redis.hdel(
                 chave_transmissoes(
                     codigo
                 ),
                 usuario_id,
             )
 
-    return usuarios_validos
+    return ativos
 
 
 # =========================================================
-# OBTER TRANSMISSÕES
+# TRANSMISSÕES
 # =========================================================
 
-def obter_transmissoes(codigo):
-
-    if not redis_disponivel():
-        return {}
+async def obter_transmissoes(
+    codigo
+):
 
     return (
-        redis.hgetall(
-            chave_transmissoes(codigo)
+        await redis.hgetall(
+            chave_transmissoes(
+                codigo
+            )
         )
         or {}
     )
 
 
 # =========================================================
-# MONTAR ESTADO
+# ESTADO DA SALA
 # =========================================================
 
-def montar_estado(codigo):
+async def montar_estado(
+    codigo
+):
 
-    usuarios = obter_usuarios(
-        codigo
+    usuarios = (
+        await obter_usuarios(
+            codigo
+        )
     )
 
-    transmissoes = obter_transmissoes(
-        codigo
+    transmissoes = (
+        await obter_transmissoes(
+            codigo
+        )
     )
 
     lista_usuarios = []
 
-    for usuario_id, nome in usuarios.items():
+    for (
+        usuario_id,
+        nome
+    ) in usuarios.items():
 
         lista_usuarios.append(
             {
@@ -356,7 +392,9 @@ def montar_estado(codigo):
 
     lista_transmissoes = []
 
-    for usuario_id in transmissoes:
+    for usuario_id in (
+        transmissoes.keys()
+    ):
 
         if usuario_id in usuarios:
 
@@ -374,65 +412,17 @@ def montar_estado(codigo):
 
     return {
         "tipo": "estado",
-        "usuarios": lista_usuarios,
+
+        "usuarios":
+            lista_usuarios,
+
         "transmissoes":
             lista_transmissoes,
     }
 
 
 # =========================================================
-# ENVIAR ESTADO
-# =========================================================
-
-async def enviar_estado_sala(
-    codigo
-):
-
-    estado = montar_estado(
-        codigo
-    )
-
-    conexoes = (
-        sockets_locais.get(
-            codigo,
-            {}
-        )
-    )
-
-    sockets_mortos = []
-
-    for usuario_id, websocket in list(
-        conexoes.items()
-    ):
-
-        try:
-
-            await websocket.send_json(
-                estado
-            )
-
-        except Exception as erro:
-
-            print(
-                "Erro ao enviar estado "
-                f"para {usuario_id}:",
-                repr(erro),
-            )
-
-            sockets_mortos.append(
-                usuario_id
-            )
-
-    for usuario_id in sockets_mortos:
-
-        conexoes.pop(
-            usuario_id,
-            None,
-        )
-
-
-# =========================================================
-# ENVIAR PARA USUÁRIO LOCAL
+# COLOCAR MENSAGEM NA FILA
 # =========================================================
 
 async def enviar_para_usuario(
@@ -441,38 +431,127 @@ async def enviar_para_usuario(
     mensagem,
 ):
 
-    websocket = (
-        sockets_locais
-        .get(codigo, {})
-        .get(usuario_id)
+    import json
+
+    fila = chave_fila(
+        codigo,
+        usuario_id,
     )
 
-    if websocket is None:
-
-        print(
-            "Usuário não está nesta "
-            "instância:",
-            usuario_id,
-        )
-
-        return False
-
-    try:
-
-        await websocket.send_json(
+    await redis.rpush(
+        fila,
+        json.dumps(
             mensagem
+        ),
+    )
+
+    await redis.expire(
+        fila,
+        TEMPO_FILA,
+    )
+
+
+# =========================================================
+# BROADCAST
+# =========================================================
+
+async def broadcast_estado(
+    codigo
+):
+
+    estado = await montar_estado(
+        codigo
+    )
+
+    usuarios = (
+        await obter_usuarios(
+            codigo
+        )
+    )
+
+    for usuario_id in (
+        usuarios.keys()
+    ):
+
+        await enviar_para_usuario(
+            codigo,
+            usuario_id,
+            estado,
         )
 
-        return True
 
-    except Exception as erro:
+# =========================================================
+# ENTREGADOR DE FILA
+# =========================================================
 
-        print(
-            "Erro ao enviar mensagem:",
-            repr(erro),
-        )
+async def entregar_fila(
+    websocket,
+    codigo,
+    usuario_id,
+):
 
-        return False
+    import json
+
+    fila = chave_fila(
+        codigo,
+        usuario_id,
+    )
+
+    while True:
+
+        try:
+
+            mensagem = (
+                await redis.lpop(
+                    fila
+                )
+            )
+
+            if mensagem:
+
+                if isinstance(
+                    mensagem,
+                    bytes,
+                ):
+
+                    mensagem = (
+                        mensagem.decode(
+                            "utf-8"
+                        )
+                    )
+
+                dados = json.loads(
+                    mensagem
+                )
+
+                await websocket.send_json(
+                    dados
+                )
+
+            else:
+
+                # Pequeno polling para
+                # atravessar instâncias
+                # diferentes da Vercel.
+
+                await asyncio.sleep(
+                    0.35
+                )
+
+        except asyncio.CancelledError:
+
+            raise
+
+        except Exception as erro:
+
+            print(
+                "ERRO FILA:",
+                repr(erro),
+            )
+
+            await asyncio.sleep(
+                1
+            )
 
 
 # =========================================================
@@ -487,9 +566,9 @@ async def websocket_sala(
 
     codigo = codigo.upper()
 
-    # -----------------------------------------------------
-    # VALIDA SALA
-    # -----------------------------------------------------
+    # =====================================================
+    # VALIDAR
+    # =====================================================
 
     if not redis_disponivel():
 
@@ -499,7 +578,9 @@ async def websocket_sala(
 
         return
 
-    if not sala_existe(codigo):
+    if not await sala_existe(
+        codigo
+    ):
 
         await websocket.close(
             code=1008
@@ -507,9 +588,10 @@ async def websocket_sala(
 
         return
 
-    # -----------------------------------------------------
-    # ACEITA CONEXÃO
-    # -----------------------------------------------------
+
+    # =====================================================
+    # CONECTAR
+    # =====================================================
 
     await websocket.accept()
 
@@ -519,17 +601,8 @@ async def websocket_sala(
 
     nome = "Usuário"
 
-    # -----------------------------------------------------
-    # REGISTRA SOCKET LOCAL
-    # -----------------------------------------------------
+    tarefa_fila = None
 
-    if codigo not in sockets_locais:
-
-        sockets_locais[codigo] = {}
-
-    sockets_locais[codigo][
-        usuario_id
-    ] = websocket
 
     try:
 
@@ -552,6 +625,7 @@ async def websocket_sala(
             await websocket.send_json(
                 {
                     "tipo": "erro",
+
                     "mensagem":
                         "Nome obrigatório.",
                 }
@@ -561,21 +635,22 @@ async def websocket_sala(
 
             return
 
+
         # =================================================
-        # SALVA USUÁRIO NO REDIS
+        # REGISTRAR USUÁRIO
         # =================================================
 
-        redis.hset(
-            chave_usuarios(codigo),
+        await redis.hset(
+            chave_usuarios(
+                codigo
+            ),
             values={
                 usuario_id: nome
             },
         )
 
-        # Marca usuário como ativo
-
-        redis.set(
-            chave_usuario_ativo(
+        await redis.set(
+            chave_ativo(
                 codigo,
                 usuario_id,
             ),
@@ -583,36 +658,55 @@ async def websocket_sala(
             ex=TEMPO_USUARIO,
         )
 
-        renovar_sala(codigo)
+        await renovar_sala(
+            codigo
+        )
+
 
         # =================================================
-        # ENVIA ID
+        # ENVIA ID DIRETAMENTE
         # =================================================
 
         await websocket.send_json(
             {
-                "tipo": "meu_id",
-                "id": usuario_id,
+                "tipo":
+                    "meu_id",
+
+                "id":
+                    usuario_id,
             }
         )
+
+
+        # =================================================
+        # INICIAR ENTREGADOR
+        # =================================================
+
+        tarefa_fila = (
+            asyncio.create_task(
+                entregar_fila(
+                    websocket,
+                    codigo,
+                    usuario_id,
+                )
+            )
+        )
+
 
         print(
             f"{nome} entrou "
             f"na sala {codigo}"
         )
 
-        usuarios = obter_usuarios(
+
+        # =================================================
+        # ATUALIZA TODOS
+        # =================================================
+
+        await broadcast_estado(
             codigo
         )
 
-        print(
-            "Usuários no Redis:",
-            len(usuarios),
-        )
-
-        await enviar_estado_sala(
-            codigo
-        )
 
         # =================================================
         # LOOP
@@ -621,13 +715,16 @@ async def websocket_sala(
         while True:
 
             mensagem = (
-                await websocket.receive_json()
+                await websocket
+                .receive_json()
             )
 
-            # Renova presença do usuário
+            # =============================================
+            # RENOVAR PRESENÇA
+            # =============================================
 
-            redis.set(
-                chave_usuario_ativo(
+            await redis.set(
+                chave_ativo(
                     codigo,
                     usuario_id,
                 ),
@@ -635,84 +732,88 @@ async def websocket_sala(
                 ex=TEMPO_USUARIO,
             )
 
-            renovar_sala(codigo)
+            await renovar_sala(
+                codigo
+            )
 
             tipo = mensagem.get(
                 "tipo"
             )
 
+
             print(
-                f"{nome} enviou evento: "
-                f"{tipo}"
+                f"{nome}: {tipo}"
             )
 
-            # =================================================
-            # HEARTBEAT
-            # =================================================
+
+            # =============================================
+            # PING
+            # =============================================
 
             if tipo == "ping":
 
-                await websocket.send_json(
+                await enviar_para_usuario(
+                    codigo,
+                    usuario_id,
                     {
                         "tipo": "pong"
-                    }
+                    },
                 )
 
-            # =================================================
-            # INICIAR TRANSMISSÃO
-            # =================================================
 
-            elif tipo == (
-                "iniciar_transmissao"
+            # =============================================
+            # INICIAR TRANSMISSÃO
+            # =============================================
+
+            elif (
+                tipo
+                == "iniciar_transmissao"
             ):
 
-                redis.hset(
+                await redis.hset(
                     chave_transmissoes(
                         codigo
                     ),
                     values={
-                        usuario_id: "1"
+                        usuario_id:
+                            "1"
                     },
                 )
-
-                renovar_sala(codigo)
 
                 print(
                     f"{nome} iniciou "
                     "transmissão"
                 )
 
-                await enviar_estado_sala(
+                await broadcast_estado(
                     codigo
                 )
 
-            # =================================================
-            # PARAR TRANSMISSÃO
-            # =================================================
 
-            elif tipo == (
-                "parar_transmissao"
+            # =============================================
+            # PARAR TRANSMISSÃO
+            # =============================================
+
+            elif (
+                tipo
+                == "parar_transmissao"
             ):
 
-                redis.hdel(
+                await redis.hdel(
                     chave_transmissoes(
                         codigo
                     ),
                     usuario_id,
                 )
 
-                print(
-                    f"{nome} encerrou "
-                    "transmissão"
-                )
-
-                await enviar_estado_sala(
+                await broadcast_estado(
                     codigo
                 )
 
-            # =================================================
+
+            # =============================================
             # ASSISTIR
-            # =================================================
+            # =============================================
 
             elif tipo == "assistir":
 
@@ -722,13 +823,10 @@ async def websocket_sala(
                     )
                 )
 
-                print(
-                    f"{nome} quer assistir "
-                    f"{transmissor_id}"
-                )
-
-                usuarios = obter_usuarios(
-                    codigo
+                usuarios = (
+                    await obter_usuarios(
+                        codigo
+                    )
                 )
 
                 if (
@@ -736,56 +834,51 @@ async def websocket_sala(
                     not in usuarios
                 ):
 
-                    print(
-                        "Transmissor não "
-                        "encontrado no Redis."
-                    )
-
-                    await websocket.send_json(
+                    await enviar_para_usuario(
+                        codigo,
+                        usuario_id,
                         {
-                            "tipo": "erro",
+                            "tipo":
+                                "erro",
+
                             "mensagem":
                                 "Transmissor "
                                 "não encontrado.",
-                        }
+                        },
                     )
 
                     continue
 
-                enviado = (
-                    await enviar_para_usuario(
-                        codigo,
-                        transmissor_id,
-                        {
-                            "tipo":
-                                "novo_espectador",
 
-                            "espectador_id":
-                                usuario_id,
-                        },
-                    )
+                print(
+                    f"{nome} quer assistir "
+                    f"{transmissor_id}"
                 )
 
-                if enviado:
 
-                    print(
-                        "Pedido enviado "
-                        "ao transmissor."
-                    )
+                # AQUI está a principal
+                # diferença:
+                #
+                # não precisamos mais
+                # que o transmissor esteja
+                # nesta mesma Function.
 
-                else:
+                await enviar_para_usuario(
+                    codigo,
+                    transmissor_id,
+                    {
+                        "tipo":
+                            "novo_espectador",
 
-                    print(
-                        "Transmissor existe "
-                        "no Redis, mas está "
-                        "em outra instância."
-                    )
+                        "espectador_id":
+                            usuario_id,
+                    },
+                )
 
-            # =================================================
-            # WEBRTC
-            #
+
+            # =============================================
             # OFFER / ANSWER / ICE
-            # =================================================
+            # =============================================
 
             elif tipo in [
                 "offer",
@@ -803,42 +896,32 @@ async def websocket_sala(
 
                     continue
 
+
                 mensagem[
                     "origem"
                 ] = usuario_id
 
+
                 print(
-                    f"{nome} enviou "
-                    f"{tipo} para "
-                    f"{destino}"
+                    f"{tipo}: "
+                    f"{usuario_id} "
+                    f"→ {destino}"
                 )
 
-                enviado = (
-                    await enviar_para_usuario(
-                        codigo,
-                        destino,
-                        mensagem,
-                    )
+
+                # Também atravessa
+                # diferentes instâncias.
+
+                await enviar_para_usuario(
+                    codigo,
+                    destino,
+                    mensagem,
                 )
 
-                if enviado:
 
-                    print(
-                        f"{tipo} "
-                        "encaminhado."
-                    )
-
-                else:
-
-                    print(
-                        f"{tipo}: usuário "
-                        "está possivelmente "
-                        "em outra instância."
-                    )
-
-            # =================================================
+            # =============================================
             # EVENTO DESCONHECIDO
-            # =================================================
+            # =============================================
 
             else:
 
@@ -847,6 +930,7 @@ async def websocket_sala(
                     tipo,
                 )
 
+
     # =====================================================
     # DESCONECTOU
     # =====================================================
@@ -854,105 +938,97 @@ async def websocket_sala(
     except WebSocketDisconnect:
 
         print(
-            f"{nome} desconectou "
-            f"da sala {codigo}"
+            f"{nome} desconectou"
         )
+
 
     except Exception as erro:
 
         print(
-            "ERRO NO WEBSOCKET:",
+            "ERRO WEBSOCKET:",
             repr(erro),
         )
 
+
     # =====================================================
-    # LIMPEZA
+    # FINALMENTE
     # =====================================================
 
     finally:
 
-        # Remove socket local
+        # =================================================
+        # CANCELAR ENTREGADOR
+        # =================================================
 
-        if codigo in sockets_locais:
+        if tarefa_fila:
 
-            sockets_locais[
-                codigo
-            ].pop(
-                usuario_id,
-                None,
-            )
+            tarefa_fila.cancel()
 
-            if not sockets_locais[
-                codigo
-            ]:
+            with suppress(
+                asyncio.CancelledError
+            ):
 
-                sockets_locais.pop(
-                    codigo,
-                    None,
-                )
+                await tarefa_fila
 
-        # Remove usuário do Redis
+
+        # =================================================
+        # LIMPAR REDIS
+        # =================================================
 
         if redis_disponivel():
 
             try:
 
-                redis.hdel(
+                await redis.hdel(
                     chave_usuarios(
                         codigo
                     ),
                     usuario_id,
                 )
 
-                redis.hdel(
+                await redis.hdel(
                     chave_transmissoes(
                         codigo
                     ),
                     usuario_id,
                 )
 
-                redis.delete(
-                    chave_usuario_ativo(
+                await redis.delete(
+                    chave_ativo(
                         codigo,
                         usuario_id,
                     )
                 )
 
+                await redis.delete(
+                    chave_fila(
+                        codigo,
+                        usuario_id,
+                    )
+                )
+
+                await broadcast_estado(
+                    codigo
+                )
+
             except Exception as erro:
 
                 print(
-                    "Erro ao limpar Redis:",
+                    "ERRO LIMPEZA:",
                     repr(erro),
                 )
 
-        print(
-            f"{nome} removido "
-            f"da sala {codigo}"
-        )
-
-        try:
-
-            await enviar_estado_sala(
-                codigo
-            )
-
-        except Exception as erro:
-
-            print(
-                "Erro ao atualizar "
-                "estado final:",
-                repr(erro),
-            )
-
 
 # =========================================================
-# ARQUIVOS ESTÁTICOS
+# STATIC
 # =========================================================
 
 app.mount(
     "/static",
+
     StaticFiles(
         directory="static"
     ),
+
     name="static",
 )

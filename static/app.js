@@ -101,13 +101,12 @@ const icePendentes = {};
 
 const TURN_USERNAME =
 
- "f3be97deaec9a7ada83c98f8";
+ "713568c33df25731fe8641aa";
 
 
 
 const TURN_CREDENTIAL =
-
- "WE4hYmTeprl6/ae2";
+ "bgZWM4k7aXiBuZ3i";
 
 
 // ======================================================
