@@ -1,14 +1,18 @@
 import os
 
 import discord
+import aiohttp
+
 from discord.ext import commands
-from discord import app_commands
 from dotenv import load_dotenv
 
 
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
+
+BASE_URL = "https://bot-para-transmi-o.vercel.app"
+
 
 intents = discord.Intents.default()
 
@@ -45,10 +49,52 @@ async def on_ready():
 async def criar_sala(
     interaction: discord.Interaction
 ):
-    await interaction.response.send_message(
-        "🚀 Comando funcionando! "
-        "Agora vamos conectar ao Screen Share."
-    )
+    await interaction.response.defer()
+
+    try:
+        async with aiohttp.ClientSession() as session:
+
+            async with session.post(
+                f"{BASE_URL}/criar-sala"
+            ) as resposta:
+
+                if resposta.status != 200:
+                    await interaction.followup.send(
+                        "Não foi possível criar a sala."
+                    )
+                    return
+
+                dados = await resposta.json()
+
+                codigo = dados["codigo"]
+
+                link = (
+                    f"{BASE_URL}/sala/{codigo}"
+                )
+
+                mensagem = (
+                    "🎥 **Sala criada!**\n\n"
+                    f"**Código:** `{codigo}`\n"
+                    f"**Entrar na sala:**\n{link}\n\n"
+                    "Qualquer pessoa com o link "
+                    "pode entrar, assistir ou transmitir."
+                )
+
+                await interaction.followup.send(
+                    mensagem
+                )
+
+    except Exception as erro:
+
+        print(
+            "Erro ao criar sala:",
+            erro
+        )
+
+        await interaction.followup.send(
+            "Ocorreu um erro ao conectar "
+            "com o Screen Share."
+        )
 
 
 if not TOKEN:
