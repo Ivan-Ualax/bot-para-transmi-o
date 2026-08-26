@@ -88,102 +88,169 @@ const icePendentes = {};
 
 
 // ======================================================
-// TURN - METERED
+// WEBRTC - CLOUDFLARE TURN
 // ======================================================
 //
-// COLOQUE AQUI SUA CREDENCIAL ATUAL DA METERED.
+// O navegador NÃO recebe a chave/API Token principal da Cloudflare.
 //
-// Depois que tudo funcionar,
-// gere outra credencial antes de publicar.
+// O backend deve fornecer credenciais TURN temporárias em:
 //
-// Não compartilhe a nova credencial publicamente.
+//     GET /api/turn-credentials
+//
+// Formatos aceitos da resposta:
+//
+// 1) Array direto:
+// [
+//   { "urls": ["stun:stun.cloudflare.com:3478"] },
+//   {
+//     "urls": [
+//       "turn:turn.cloudflare.com:3478?transport=udp",
+//       "turn:turn.cloudflare.com:3478?transport=tcp",
+//       "turn:turn.cloudflare.com:80?transport=tcp",
+//       "turns:turn.cloudflare.com:5349?transport=tcp",
+//       "turns:turn.cloudflare.com:443?transport=tcp"
+//     ],
+//     "username": "...",
+//     "credential": "..."
+//   }
+// ]
+//
+// 2) Objeto:
+// { "iceServers": [ ... ] }
+//
+// Enquanto o TURN não estiver carregado, usamos STUN como fallback.
 //
 
-// ======================================================
-// TURN - METERED
-// ======================================================
+let iceServersAtuais = [
+    {
+        urls: [
+            "stun:stun.cloudflare.com:3478"
+        ]
+    }
+];
 
-const TURN_USERNAME =
-    "713568c33df25731fe8641aa";
-
-const TURN_CREDENTIAL =
-    "bgZWM4k7aXiBuZ3i";
-
-
-// ======================================================
-// CONFIGURAÇÃO WEBRTC
-// ======================================================
 
 const configuracaoRTC = {
 
-    iceServers: [
+    iceServers:
+        iceServersAtuais,
 
-        // STUN
-        {
-            urls:
-                "stun:stun.relay.metered.ca:80"
-        },
+    // Usa conexão direta quando possível
+    // e TURN quando a rede exigir.
+    iceTransportPolicy:
+        "all",
 
-        // TURN UDP
-        {
-            urls:
-                "turn:br.relay.metered.ca:80",
+    bundlePolicy:
+        "max-bundle",
 
-            username:
-                TURN_USERNAME,
+    rtcpMuxPolicy:
+        "require"
+};
 
-            credential:
-                TURN_CREDENTIAL
-        },
 
-        // TURN TCP
-        {
-            urls:
-                "turn:br.relay.metered.ca:80?transport=tcp",
+async function carregarIceServersCloudflare() {
 
-            username:
-                TURN_USERNAME,
+    const endpoint =
+        `${BASE_URL}/api/turn-credentials`;
 
-            credential:
-                TURN_CREDENTIAL
-        },
 
-        // TURN 443
-        {
-            urls:
-                "turn:br.relay.metered.ca:443",
+    console.log(
+        "Buscando credenciais TURN temporárias..."
+    );
 
-            username:
-                TURN_USERNAME,
 
-            credential:
-                TURN_CREDENTIAL
-        },
+    try {
 
-        // TURN TLS
-        {
-            urls:
-                "turns:br.relay.metered.ca:443?transport=tcp",
+        const resposta =
+            await fetch(
+                endpoint,
+                {
+                    method:
+                        "GET",
 
-            username:
-                TURN_USERNAME,
+                    headers: {
+                        "Accept":
+                            "application/json"
+                    },
 
-            credential:
-                TURN_CREDENTIAL
+                    cache:
+                        "no-store"
+                }
+            );
+
+
+        if (!resposta.ok) {
+
+            throw new Error(
+                `TURN API respondeu ${resposta.status}`
+            );
         }
 
-    ],
 
-    // Usa TURN quando disponível e permite conexão direta como fallback
-            iceTransportPolicy:
-                "all",
+        const dados =
+            await resposta.json();
 
-            bundlePolicy:
-                "max-bundle",
 
-            rtcpMuxPolicy:
-                "require"
-};
+        const servidores =
+            Array.isArray(dados)
+                ? dados
+                : dados.iceServers;
+
+
+        if (
+            !Array.isArray(servidores) ||
+            servidores.length === 0
+        ) {
+
+            throw new Error(
+                "Resposta TURN sem iceServers válidos."
+            );
+        }
+
+
+        iceServersAtuais =
+            servidores;
+
+
+        configuracaoRTC.iceServers =
+            iceServersAtuais;
+
+
+        console.log(
+            "✅ CLOUDFLARE TURN CONFIGURADO:",
+            iceServersAtuais.map(
+                servidor => servidor.urls
+            )
+        );
+
+
+        return true;
+
+
+    } catch (erro) {
+
+        console.warn(
+            "Cloudflare TURN indisponível. Usando STUN/P2P como fallback:",
+            erro
+        );
+
+
+        iceServersAtuais = [
+            {
+                urls: [
+                    "stun:stun.cloudflare.com:3478"
+                ]
+            }
+        ];
+
+
+        configuracaoRTC.iceServers =
+            iceServersAtuais;
+
+
+        return false;
+    }
+}
 
 
 // ======================================================
@@ -340,11 +407,16 @@ async function copiarConvite() {
 // ENTRAR NA SALA
 // ======================================================
 
-function conectar() {
+async function conectar() {
 
     console.log(
         "Entrando na sala..."
     );
+
+
+    // Atualiza as credenciais TURN temporárias antes
+    // de criar qualquer RTCPeerConnection.
+    await carregarIceServersCloudflare();
 
 
     if (!codigoSala) {
@@ -1892,7 +1964,7 @@ function criarPeer(
             ) {
 
                 console.log(
-                    "✅ TURN RELAY OBTIDO"
+                    "✅ TURN RELAY OBTIDO (Cloudflare)"
                 );
             }
 
