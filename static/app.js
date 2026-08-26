@@ -2,16 +2,26 @@
 // CONFIGURAÇÃO
 // ======================================================
 
-const BASE_URL = "https://bot-para-transmi-o.vercel.app";
-const SIGNALING_URL = "wss://bot-para-transmi-o.vercel.app";
+const BASE_URL =
+    "https://bot-para-transmi-o.vercel.app";
+
+const SIGNALING_URL =
+    "wss://bot-para-transmi-o.vercel.app";
+
 
 const partes = window.location.pathname
     .split("/")
     .filter(Boolean);
 
-const codigoSala = partes[1] || null;
 
-console.log("Sala:", codigoSala);
+const codigoSala =
+    partes[1] || null;
+
+
+console.log(
+    "Sala:",
+    codigoSala
+);
 
 
 // ======================================================
@@ -21,35 +31,46 @@ console.log("Sala:", codigoSala);
 const nomeInput =
     document.getElementById("nome");
 
+
 const botaoEntrar =
     document.getElementById("entrar");
+
 
 const botaoTransmitir =
     document.getElementById("transmitir");
 
+
 const botaoParar =
     document.getElementById("parar");
+
 
 const botaoCopiar =
     document.getElementById("copiar-link");
 
+
 const entrada =
     document.getElementById("entrada");
+
 
 const painel =
     document.getElementById("painel");
 
+
 const usuariosOnline =
     document.getElementById("usuarios-online");
+
 
 const transmissoesDiv =
     document.getElementById("transmissoes");
 
+
 const statusTexto =
     document.getElementById("status");
 
+
 const codigoSalaTexto =
     document.getElementById("codigo-sala");
+
 
 const video =
     document.getElementById("video");
@@ -62,9 +83,11 @@ const video =
 let socket = null;
 
 let meuId = null;
+
 let meuNome = null;
 
 let streamLocal = null;
+
 let streamRemoto = null;
 
 let transmitindo = false;
@@ -73,35 +96,51 @@ let transmissaoAtual = null;
 
 let heartbeat = null;
 
+
 const peers = {};
+
 const icePendentes = {};
 
 
 // ======================================================
-// TURN
+// TURN - METERED
 // ======================================================
 //
-// MANTENHA aqui o username e a credential
-// que você pegou na Metered.
+// COLOQUE AQUI SUAS CREDENCIAIS DA METERED.
 //
-// Eu não vou repetir sua senha aqui.
+// Depois que o teste funcionar,
+// gere uma credencial nova antes de publicar.
 //
 
 const TURN_USERNAME =
-    "COLOQUE_SEU_USERNAME_METERED";
+    "f3be97deaec9a7ada83c98f8";
+
 
 const TURN_CREDENTIAL =
-    "COLOQUE_SUA_CREDENTIAL_METERED";
+    "WE4hYmTeprl6/ae2";
 
+
+// ======================================================
+// CONFIGURAÇÃO WEBRTC
+// ======================================================
 
 const configuracaoRTC = {
 
     iceServers: [
 
+        // ==============================================
+        // STUN
+        // ==============================================
+
         {
             urls:
                 "stun:stun.relay.metered.ca:80"
         },
+
+
+        // ==============================================
+        // TURN UDP 80
+        // ==============================================
 
         {
             urls:
@@ -114,6 +153,11 @@ const configuracaoRTC = {
                 TURN_CREDENTIAL
         },
 
+
+        // ==============================================
+        // TURN TCP 80
+        // ==============================================
+
         {
             urls:
                 "turn:global.relay.metered.ca:80?transport=tcp",
@@ -124,6 +168,11 @@ const configuracaoRTC = {
             credential:
                 TURN_CREDENTIAL
         },
+
+
+        // ==============================================
+        // TURN 443
+        // ==============================================
 
         {
             urls:
@@ -136,6 +185,11 @@ const configuracaoRTC = {
                 TURN_CREDENTIAL
         },
 
+
+        // ==============================================
+        // TURNS TCP 443
+        // ==============================================
+
         {
             urls:
                 "turns:global.relay.metered.ca:443?transport=tcp",
@@ -146,11 +200,25 @@ const configuracaoRTC = {
             credential:
                 TURN_CREDENTIAL
         }
+
     ],
 
-    iceTransportPolicy: "all",
-    bundlePolicy: "max-bundle",
-    rtcpMuxPolicy: "require"
+
+    // ==================================================
+    // TESTE:
+    // FORÇA O USO DO TURN
+    // ==================================================
+
+    iceTransportPolicy:
+        "relay",
+
+
+    bundlePolicy:
+        "max-bundle",
+
+
+    rtcpMuxPolicy:
+        "require"
 };
 
 
@@ -205,7 +273,8 @@ function iniciarPagina() {
             evento => {
 
                 if (
-                    evento.key === "Enter"
+                    evento.key ===
+                    "Enter"
                 ) {
 
                     conectar();
@@ -256,19 +325,23 @@ async function copiarConvite() {
         );
 
 
-        botaoCopiar.textContent =
-            "Link copiado!";
+        if (botaoCopiar) {
+
+            botaoCopiar.textContent =
+                "Link copiado!";
 
 
-        setTimeout(
-            () => {
+            setTimeout(
+                () => {
 
-                botaoCopiar.textContent =
-                    "Copiar convite";
+                    botaoCopiar.textContent =
+                        "Copiar convite";
 
-            },
-            2000
-        );
+                },
+                2000
+            );
+        }
+
 
     } catch (erro) {
 
@@ -298,8 +371,11 @@ function conectar() {
 
     if (!codigoSala) {
 
-        statusTexto.textContent =
-            "Sala inválida.";
+        if (statusTexto) {
+
+            statusTexto.textContent =
+                "Sala inválida.";
+        }
 
         return;
     }
@@ -348,15 +424,19 @@ function conectar() {
     }
 
 
-    meuNome = nome;
+    meuNome =
+        nome;
 
 
     botaoEntrar.disabled =
         true;
 
 
-    statusTexto.textContent =
-        "Conectando à sala...";
+    if (statusTexto) {
+
+        statusTexto.textContent =
+            "Conectando à sala...";
+    }
 
 
     const endereco =
@@ -376,6 +456,7 @@ function conectar() {
                 endereco
             );
 
+
     } catch (erro) {
 
         console.error(
@@ -388,12 +469,20 @@ function conectar() {
             false;
 
 
-        statusTexto.textContent =
-            "Erro ao conectar.";
+        if (statusTexto) {
+
+            statusTexto.textContent =
+                "Erro ao conectar.";
+        }
+
 
         return;
     }
 
+
+    // ==================================================
+    // WEBSOCKET ABERTO
+    // ==================================================
 
     socket.onopen =
         () => {
@@ -405,7 +494,8 @@ function conectar() {
 
             socket.send(
                 JSON.stringify({
-                    nome: meuNome
+                    nome:
+                        meuNome
                 })
             );
 
@@ -424,13 +514,20 @@ function conectar() {
             }
 
 
-            statusTexto.textContent =
-                `Conectado como ${meuNome}`;
+            if (statusTexto) {
+
+                statusTexto.textContent =
+                    `Conectado como ${meuNome}`;
+            }
 
 
             iniciarHeartbeat();
         };
 
+
+    // ==================================================
+    // WEBSOCKET ERRO
+    // ==================================================
 
     socket.onerror =
         erro => {
@@ -445,10 +542,17 @@ function conectar() {
                 false;
 
 
-            statusTexto.textContent =
-                "Erro ao conectar ao servidor.";
+            if (statusTexto) {
+
+                statusTexto.textContent =
+                    "Erro ao conectar ao servidor.";
+            }
         };
 
+
+    // ==================================================
+    // WEBSOCKET FECHADO
+    // ==================================================
 
     socket.onclose =
         evento => {
@@ -469,8 +573,11 @@ function conectar() {
                 false;
 
 
-            statusTexto.textContent =
-                "Desconectado do servidor.";
+            if (statusTexto) {
+
+                statusTexto.textContent =
+                    "Desconectado do servidor.";
+            }
         };
 
 
@@ -499,7 +606,8 @@ function iniciarHeartbeat() {
                 ) {
 
                     enviarSocket({
-                        tipo: "ping"
+                        tipo:
+                            "ping"
                     });
                 }
 
@@ -522,7 +630,8 @@ function pararHeartbeat() {
     );
 
 
-    heartbeat = null;
+    heartbeat =
+        null;
 }
 
 
@@ -544,6 +653,7 @@ async function receberMensagem(
                 evento.data
             );
 
+
     } catch (erro) {
 
         console.error(
@@ -551,6 +661,7 @@ async function receberMensagem(
             evento.data,
             erro
         );
+
 
         return;
     }
@@ -582,6 +693,7 @@ async function receberMensagem(
                 meuId
             );
 
+
             break;
 
 
@@ -592,13 +704,16 @@ async function receberMensagem(
         case "estado":
 
             atualizarUsuarios(
-                mensagem.usuarios || []
+                mensagem.usuarios ||
+                []
             );
 
 
             atualizarTransmissoes(
-                mensagem.transmissoes || []
+                mensagem.transmissoes ||
+                []
             );
+
 
             break;
 
@@ -621,6 +736,7 @@ async function receberMensagem(
                     "Não estou transmitindo."
                 );
 
+
                 return;
             }
 
@@ -628,6 +744,7 @@ async function receberMensagem(
             await criarOfertaParaEspectador(
                 mensagem.espectador_id
             );
+
 
             break;
 
@@ -648,6 +765,7 @@ async function receberMensagem(
                 mensagem
             );
 
+
             break;
 
 
@@ -667,6 +785,7 @@ async function receberMensagem(
                 mensagem
             );
 
+
             break;
 
 
@@ -680,8 +799,13 @@ async function receberMensagem(
                 mensagem
             );
 
+
             break;
 
+
+        // ==================================================
+        // PONG
+        // ==================================================
 
         case "pong":
 
@@ -689,8 +813,13 @@ async function receberMensagem(
                 "PONG"
             );
 
+
             break;
 
+
+        // ==================================================
+        // ERRO
+        // ==================================================
 
         case "erro":
 
@@ -700,9 +829,13 @@ async function receberMensagem(
             );
 
 
-            statusTexto.textContent =
-                mensagem.mensagem ||
-                "Erro no servidor.";
+            if (statusTexto) {
+
+                statusTexto.textContent =
+                    mensagem.mensagem ||
+                    "Erro no servidor.";
+            }
+
 
             break;
 
@@ -743,6 +876,7 @@ function atualizarUsuarios(
         usuariosOnline.textContent =
             "Nenhum usuário online.";
 
+
         return;
     }
 
@@ -761,7 +895,8 @@ function atualizarUsuarios(
 
 
             if (
-                usuario.id === meuId
+                usuario.id ===
+                    meuId
             ) {
 
                 item.textContent =
@@ -807,6 +942,7 @@ function atualizarTransmissoes(
 
         transmissoesDiv.textContent =
             "Nenhuma transmissão ativa.";
+
 
         return;
     }
@@ -902,8 +1038,12 @@ async function iniciarTransmissao() {
             WebSocket.OPEN
     ) {
 
-        statusTexto.textContent =
-            "Entre na sala primeiro.";
+        if (statusTexto) {
+
+            statusTexto.textContent =
+                "Entre na sala primeiro.";
+        }
+
 
         return;
     }
@@ -911,11 +1051,16 @@ async function iniciarTransmissao() {
 
     if (
         !navigator.mediaDevices ||
-        !navigator.mediaDevices.getDisplayMedia
+        !navigator.mediaDevices
+            .getDisplayMedia
     ) {
 
-        statusTexto.textContent =
-            "Seu navegador não permite compartilhar tela.";
+        if (statusTexto) {
+
+            statusTexto.textContent =
+                "Seu navegador não permite compartilhar tela.";
+        }
+
 
         return;
     }
@@ -930,13 +1075,17 @@ async function iniciarTransmissao() {
                     video: {
 
                         frameRate: {
-                            ideal: 30,
-                            max: 60
-                        }
 
+                            ideal:
+                                30,
+
+                            max:
+                                60
+                        }
                     },
 
-                    audio: true
+                    audio:
+                        true
                 });
 
 
@@ -952,6 +1101,7 @@ async function iniciarTransmissao() {
                 .getTracks()
                 .map(
                     track => ({
+
                         kind:
                             track.kind,
 
@@ -983,6 +1133,7 @@ async function iniciarTransmissao() {
 
                 await video.play();
 
+
             } catch (erro) {
 
                 console.log(
@@ -998,8 +1149,10 @@ async function iniciarTransmissao() {
 
 
         enviarSocket({
+
             tipo:
                 "iniciar_transmissao"
+
         });
 
 
@@ -1017,8 +1170,11 @@ async function iniciarTransmissao() {
         }
 
 
-        statusTexto.textContent =
-            "Transmitindo tela";
+        if (statusTexto) {
+
+            statusTexto.textContent =
+                "Transmitindo tela";
+        }
 
 
         const videoTrack =
@@ -1041,8 +1197,11 @@ async function iniciarTransmissao() {
         );
 
 
-        statusTexto.textContent =
-            "Erro ao iniciar transmissão.";
+        if (statusTexto) {
+
+            statusTexto.textContent =
+                "Erro ao iniciar transmissão.";
+        }
     }
 }
 
@@ -1073,6 +1232,7 @@ function pararTransmissao() {
                     track.onended =
                         null;
 
+
                     track.stop();
                 }
             );
@@ -1094,8 +1254,10 @@ function pararTransmissao() {
 
 
     enviarSocket({
+
         tipo:
             "parar_transmissao"
+
     });
 
 
@@ -1113,8 +1275,11 @@ function pararTransmissao() {
     }
 
 
-    statusTexto.textContent =
-        "Transmissão encerrada";
+    if (statusTexto) {
+
+        statusTexto.textContent =
+            "Transmissão encerrada";
+    }
 }
 
 
@@ -1134,7 +1299,8 @@ function assistirTransmissao(
 
     if (
         !transmissorId ||
-        transmissorId === meuId
+        transmissorId ===
+            meuId
     ) {
 
         return;
@@ -1147,8 +1313,12 @@ function assistirTransmissao(
             WebSocket.OPEN
     ) {
 
-        statusTexto.textContent =
-            "Servidor desconectado.";
+        if (statusTexto) {
+
+            statusTexto.textContent =
+                "Servidor desconectado.";
+        }
+
 
         return;
     }
@@ -1179,19 +1349,25 @@ function assistirTransmissao(
         video.srcObject =
             streamRemoto;
 
+
         video.muted =
             false;
 
+
         video.autoplay =
             true;
+
 
         video.controls =
             true;
     }
 
 
-    statusTexto.textContent =
-        "Conectando à transmissão...";
+    if (statusTexto) {
+
+        statusTexto.textContent =
+            "Conectando à transmissão...";
+    }
 
 
     enviarSocket({
@@ -1215,7 +1391,7 @@ async function criarOfertaParaEspectador(
 ) {
 
     console.log(
-        "Criando offer para:",
+        "Criando OFFER para:",
         espectadorId
     );
 
@@ -1225,6 +1401,7 @@ async function criarOfertaParaEspectador(
         console.error(
             "Sem stream local."
         );
+
 
         return;
     }
@@ -1285,10 +1462,16 @@ async function criarOfertaParaEspectador(
         });
 
 
+        console.log(
+            "OFFER enviada:",
+            espectadorId
+        );
+
+
     } catch (erro) {
 
         console.error(
-            "Erro offer:",
+            "Erro OFFER:",
             erro
         );
     }
@@ -1384,8 +1567,11 @@ async function receberOferta(
         );
 
 
-        statusTexto.textContent =
-            "Recebendo transmissão...";
+        if (statusTexto) {
+
+            statusTexto.textContent =
+                "Recebendo transmissão...";
+        }
 
 
     } catch (erro) {
@@ -1400,8 +1586,11 @@ async function receberOferta(
             null;
 
 
-        statusTexto.textContent =
-            "Erro ao conectar à transmissão.";
+        if (statusTexto) {
+
+            statusTexto.textContent =
+                "Erro ao conectar à transmissão.";
+        }
     }
 }
 
@@ -1431,6 +1620,7 @@ async function receberAnswer(
             usuarioId
         );
 
+
         return;
     }
 
@@ -1439,13 +1629,14 @@ async function receberAnswer(
 
         if (
             peer.signalingState !==
-            "have-local-offer"
+                "have-local-offer"
         ) {
 
             console.log(
-                "Answer ignorada:",
+                "ANSWER ignorada:",
                 peer.signalingState
             );
+
 
             return;
         }
@@ -1599,6 +1790,33 @@ function criarPeer(
 
 
     // ==================================================
+    // ERRO DE ICE SERVER
+    // ==================================================
+
+    peer.onicecandidateerror =
+        evento => {
+
+            console.error(
+                "ERRO ICE SERVER:",
+                {
+
+                    url:
+                        evento.url,
+
+                    codigo:
+                        evento.errorCode,
+
+                    texto:
+                        evento.errorText,
+
+                    hostCandidate:
+                        evento.hostCandidate
+                }
+            );
+        };
+
+
+    // ==================================================
     // ICE LOCAL
     // ==================================================
 
@@ -1611,6 +1829,7 @@ function criarPeer(
                     "ICE gathering completo."
                 );
 
+
                 return;
             }
 
@@ -1618,6 +1837,7 @@ function criarPeer(
             console.log(
                 "ICE LOCAL:",
                 {
+
                     tipo:
                         evento.candidate.type,
 
@@ -1628,7 +1848,10 @@ function criarPeer(
                         evento.candidate.address,
 
                     porta:
-                        evento.candidate.port
+                        evento.candidate.port,
+
+                    candidate:
+                        evento.candidate.candidate
                 }
             );
 
@@ -1645,6 +1868,7 @@ function criarPeer(
                     evento.candidate.toJSON
                         ? evento.candidate.toJSON()
                         : evento.candidate
+
             });
         };
 
@@ -1725,21 +1949,27 @@ function criarPeer(
                                 );
 
 
-                                statusTexto.textContent =
-                                    "Conectado. Toque no vídeo.";
+                                if (statusTexto) {
+
+                                    statusTexto.textContent =
+                                        "Conectado. Toque no vídeo.";
+                                }
                             }
                         );
                 }
 
 
-                statusTexto.textContent =
-                    "Assistindo transmissão";
+                if (statusTexto) {
+
+                    statusTexto.textContent =
+                        "Assistindo transmissão";
+                }
             };
     }
 
 
     // ==================================================
-    // WEBRTC
+    // ESTADO WEBRTC
     // ==================================================
 
     peer.onconnectionstatechange =
@@ -1757,18 +1987,23 @@ function criarPeer(
 
 
             if (
-                estado === "connected"
+                estado ===
+                    "connected"
             ) {
 
-                statusTexto.textContent =
-                    receberVideo
-                        ? "Assistindo transmissão"
-                        : "Espectador conectado";
+                if (statusTexto) {
+
+                    statusTexto.textContent =
+                        receberVideo
+                            ? "Assistindo transmissão"
+                            : "Espectador conectado";
+                }
             }
 
 
             if (
-                estado === "failed"
+                estado ===
+                    "failed"
             ) {
 
                 console.error(
@@ -1783,34 +2018,79 @@ function criarPeer(
                         null;
 
 
-                    statusTexto.textContent =
-                        "Falha ao conectar à transmissão.";
+                    if (statusTexto) {
+
+                        statusTexto.textContent =
+                            "Falha ao conectar à transmissão.";
+                    }
                 }
+            }
+
+
+            if (
+                estado ===
+                    "disconnected"
+            ) {
+
+                console.warn(
+                    "WEBRTC desconectado:",
+                    usuarioId
+                );
+            }
+
+
+            if (
+                estado ===
+                    "closed"
+            ) {
+
+                console.log(
+                    "WEBRTC fechado:",
+                    usuarioId
+                );
             }
         };
 
 
     // ==================================================
-    // ICE STATE
+    // ICE CONNECTION STATE
     // ==================================================
 
     peer.oniceconnectionstatechange =
         () => {
 
+            const estado =
+                peer.iceConnectionState;
+
+
             console.log(
                 "ICE STATE:",
                 usuarioId,
-                peer.iceConnectionState
+                estado
             );
 
 
             if (
-                peer.iceConnectionState ===
-                "failed"
+                estado ===
+                    "failed"
             ) {
 
                 console.error(
                     "ICE FAILED:",
+                    usuarioId
+                );
+            }
+
+
+            if (
+                estado ===
+                    "connected" ||
+                estado ===
+                    "completed"
+            ) {
+
+                console.log(
+                    "ICE CONECTADO:",
                     usuarioId
                 );
             }
@@ -1924,7 +2204,7 @@ async function adicionarIcePendentes(
 
 
 // ======================================================
-// ENVIAR SOCKET
+// ENVIAR WEBSOCKET
 // ======================================================
 
 function enviarSocket(
@@ -1942,6 +2222,7 @@ function enviarSocket(
             dados
         );
 
+
         return false;
     }
 
@@ -1956,6 +2237,7 @@ function enviarSocket(
 
 
         return true;
+
 
     } catch (erro) {
 
@@ -1992,6 +2274,10 @@ function fecharPeer(
                 null;
 
 
+            peer.onicecandidateerror =
+                null;
+
+
             peer.ontrack =
                 null;
 
@@ -2004,11 +2290,16 @@ function fecharPeer(
                 null;
 
 
+            peer.onicegatheringstatechange =
+                null;
+
+
             peer.onsignalingstatechange =
                 null;
 
 
             peer.close();
+
 
         } catch (erro) {
 
@@ -2084,6 +2375,7 @@ window.addEventListener(
                     "Página encerrada"
                 );
 
+
             } catch (erro) {
 
                 console.log(
@@ -2101,13 +2393,14 @@ window.addEventListener(
 
 if (
     document.readyState ===
-    "loading"
+        "loading"
 ) {
 
     document.addEventListener(
         "DOMContentLoaded",
         iniciarPagina
     );
+
 
 } else {
 
