@@ -174,15 +174,15 @@ const configuracaoRTC = {
 
     ],
 
-    // Força o uso do TURN durante o teste
-    iceTransportPolicy:
-        "relay",
+    // Usa TURN quando disponível e permite conexão direta como fallback
+            iceTransportPolicy:
+                "all",
 
-    bundlePolicy:
-        "max-bundle",
+            bundlePolicy:
+                "max-bundle",
 
-    rtcpMuxPolicy:
-        "require"
+            rtcpMuxPolicy:
+                "require"
 };
 
 
