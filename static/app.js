@@ -1,5 +1,5 @@
 // ======================================================
-// SALA
+// CONFIGURAÇÃO GERAL
 // ======================================================
 
 const partes = window.location.pathname
@@ -9,6 +9,27 @@ const partes = window.location.pathname
 const codigoSala = partes[1];
 
 console.log("Sala:", codigoSala);
+
+
+// ======================================================
+// SERVIDOR DE SINALIZAÇÃO
+// ======================================================
+//
+// IMPORTANTE:
+// A página continua hospedada na Vercel.
+//
+// Mas WebSocket / offer / answer / ICE
+// vão passar pelo Render.
+//
+// Quando criar o Web Service no Render,
+// troque SEU-SERVICO.onrender.com pela URL real.
+//
+// Exemplo:
+// wss://screen-share-signaling.onrender.com
+//
+
+const SIGNALING_URL =
+    "wss://SEU-SERVICO.onrender.com";
 
 
 // ======================================================
@@ -68,17 +89,15 @@ let transmitindo = false;
 
 let transmissaoAtual = null;
 
+let heartbeat = null;
 
-// Peer por usuário:
-//
-// peers["id_usuario"] = RTCPeerConnection
+
+// PeerConnection por usuário
 
 const peers = {};
 
 
-// ICE recebido antes de remoteDescription:
-//
-// icePendentes["id_usuario"] = []
+// ICE recebido antes de remoteDescription
 
 const icePendentes = {};
 
@@ -86,55 +105,84 @@ const icePendentes = {};
 // ======================================================
 // WEBRTC
 // ======================================================
+//
+// Não coloque credenciais TURN públicas definitivas
+// diretamente no GitHub.
+//
+// Para o teste, preencha com sua credencial atual.
+// Depois vamos mover isso para configuração segura.
+//
 
-// ======================================================
-// WEBRTC - STUN + TURN METERED
-// ======================================================
+const TURN_USERNAME =
+    "f3be97deaec9a7ada83c98f8";
+
+const TURN_CREDENTIAL =
+    "WE4hYmTeprl6/ae2";
+
 
 const configuracaoRTC = {
 
     iceServers: [
 
-        // STUN
         {
-            urls: "stun:stun.relay.metered.ca:80"
+            urls:
+                "stun:stun.relay.metered.ca:80"
         },
 
-        // TURN UDP
         {
-            urls: "turn:global.relay.metered.ca:80",
-            username: "f3be97deaec9a7ada83c98f8",
-            credential: "WE4hYmTeprl6/ae2"
+            urls:
+                "turn:global.relay.metered.ca:80",
+
+            username:
+                TURN_USERNAME,
+
+            credential:
+                TURN_CREDENTIAL
         },
 
-        // TURN TCP
         {
-            urls: "turn:global.relay.metered.ca:80?transport=tcp",
-            username: "f3be97deaec9a7ada83c98f8",
-            credential: "WE4hYmTeprl6/ae2"
+            urls:
+                "turn:global.relay.metered.ca:80?transport=tcp",
+
+            username:
+                TURN_USERNAME,
+
+            credential:
+                TURN_CREDENTIAL
         },
 
-        // TURN porta 443
         {
-            urls: "turn:global.relay.metered.ca:443",
-            username: "f3be97deaec9a7ada83c98f8",
-            credential: "WE4hYmTeprl6/ae2"
+            urls:
+                "turn:global.relay.metered.ca:443",
+
+            username:
+                TURN_USERNAME,
+
+            credential:
+                TURN_CREDENTIAL
         },
 
-        // TURN seguro
         {
-            urls: "turns:global.relay.metered.ca:443?transport=tcp",
-            username: "f3be97deaec9a7ada83c98f8",
-            credential: "WE4hYmTeprl6/ae2"
+            urls:
+                "turns:global.relay.metered.ca:443?transport=tcp",
+
+            username:
+                TURN_USERNAME,
+
+            credential:
+                TURN_CREDENTIAL
         }
 
     ],
 
-    iceTransportPolicy: "all",
+    iceTransportPolicy:
+        "all",
 
-    bundlePolicy: "max-bundle",
+    bundlePolicy:
+        "max-bundle",
 
-    rtcpMuxPolicy: "require"
+    rtcpMuxPolicy:
+        "require"
 };
 
 
@@ -150,7 +198,7 @@ if (codigoSalaTexto) {
 
 
 // ======================================================
-// COPIAR LINK
+// COPIAR CONVITE
 // ======================================================
 
 if (botaoCopiar) {
@@ -191,7 +239,7 @@ async function copiarConvite() {
         );
 
         alert(
-            "Não foi possível copiar automaticamente."
+            "Não foi possível copiar o link."
         );
     }
 }
@@ -212,6 +260,7 @@ nomeInput.addEventListener(
     evento => {
 
         if (evento.key === "Enter") {
+
             conectar();
         }
     }
@@ -251,23 +300,16 @@ function conectar() {
 
     meuNome = nome;
 
-
     botaoEntrar.disabled =
         true;
 
 
-    const protocolo =
-        window.location.protocol === "https:"
-            ? "wss"
-            : "ws";
-
-
     const endereco =
-        `${protocolo}://${window.location.host}/ws/${codigoSala}`;
+        `${SIGNALING_URL}/ws/${codigoSala}`;
 
 
     console.log(
-        "Conectando:",
+        "Conectando no servidor de sinalização:",
         endereco
     );
 
@@ -278,19 +320,21 @@ function conectar() {
         );
 
 
+    // ==================================================
+    // SOCKET ABRIU
+    // ==================================================
+
     socket.onopen =
         () => {
 
             console.log(
-                "WebSocket conectado"
+                "WebSocket conectado ao Render."
             );
 
 
-            socket.send(
-                JSON.stringify({
-                    nome: meuNome
-                })
-            );
+            enviarSocket({
+                nome: meuNome
+            });
 
 
             entrada.style.display =
@@ -303,8 +347,15 @@ function conectar() {
 
             statusTexto.textContent =
                 `Conectado como ${meuNome}`;
+
+
+            iniciarHeartbeat();
         };
 
+
+    // ==================================================
+    // ERRO
+    // ==================================================
 
     socket.onerror =
         erro => {
@@ -320,19 +371,31 @@ function conectar() {
 
 
             statusTexto.textContent =
-                "Erro ao entrar na sala.";
+                "Erro ao conectar ao servidor.";
         };
 
 
+    // ==================================================
+    // SOCKET FECHOU
+    // ==================================================
+
     socket.onclose =
-        () => {
+        evento => {
 
             console.log(
-                "WebSocket desconectado"
+                "WebSocket fechado:",
+                evento.code,
+                evento.reason
             );
 
 
+            pararHeartbeat();
+
             fecharTodosPeers();
+
+
+            botaoEntrar.disabled =
+                false;
 
 
             statusTexto.textContent =
@@ -340,13 +403,60 @@ function conectar() {
         };
 
 
+    // ==================================================
+    // RECEBER
+    // ==================================================
+
     socket.onmessage =
         receberMensagem;
 }
 
 
 // ======================================================
-// RECEBER WEBSOCKET
+// HEARTBEAT
+// ======================================================
+
+function iniciarHeartbeat() {
+
+    pararHeartbeat();
+
+
+    heartbeat =
+        setInterval(
+            () => {
+
+                if (
+                    socket &&
+                    socket.readyState ===
+                        WebSocket.OPEN
+                ) {
+
+                    enviarSocket({
+                        tipo: "ping"
+                    });
+                }
+
+            },
+            30000
+        );
+}
+
+
+function pararHeartbeat() {
+
+    if (heartbeat) {
+
+        clearInterval(
+            heartbeat
+        );
+
+        heartbeat = null;
+    }
+}
+
+
+// ======================================================
+// RECEBER MENSAGENS
 // ======================================================
 
 async function receberMensagem(
@@ -366,7 +476,7 @@ async function receberMensagem(
     } catch (erro) {
 
         console.error(
-            "Mensagem inválida:",
+            "JSON inválido:",
             erro
         );
 
@@ -384,14 +494,15 @@ async function receberMensagem(
         mensagem.tipo
     ) {
 
-        // ==========================================
+        // ==================================================
         // MEU ID
-        // ==========================================
+        // ==================================================
 
         case "meu_id":
 
             meuId =
                 mensagem.id;
+
 
             console.log(
                 "Meu ID:",
@@ -401,15 +512,16 @@ async function receberMensagem(
             break;
 
 
-        // ==========================================
+        // ==================================================
         // ESTADO
-        // ==========================================
+        // ==================================================
 
         case "estado":
 
             atualizarUsuarios(
                 mensagem.usuarios || []
             );
+
 
             atualizarTransmissoes(
                 mensagem.transmissoes || []
@@ -418,17 +530,22 @@ async function receberMensagem(
             break;
 
 
-        // ==========================================
+        // ==================================================
         // NOVO ESPECTADOR
-        // ==========================================
+        // ==================================================
 
         case "novo_espectador":
+
+            console.log(
+                "Novo espectador:",
+                mensagem.espectador_id
+            );
+
 
             if (!transmitindo) {
 
                 console.log(
-                    "Recebi espectador, " +
-                    "mas não estou transmitindo."
+                    "Não estou transmitindo."
                 );
 
                 return;
@@ -442,11 +559,17 @@ async function receberMensagem(
             break;
 
 
-        // ==========================================
+        // ==================================================
         // OFFER
-        // ==========================================
+        // ==================================================
 
         case "offer":
+
+            console.log(
+                "Offer recebida:",
+                mensagem.origem
+            );
+
 
             await receberOferta(
                 mensagem
@@ -455,9 +578,9 @@ async function receberMensagem(
             break;
 
 
-        // ==========================================
+        // ==================================================
         // ANSWER
-        // ==========================================
+        // ==================================================
 
         case "answer":
 
@@ -468,9 +591,9 @@ async function receberMensagem(
             break;
 
 
-        // ==========================================
+        // ==================================================
         // ICE
-        // ==========================================
+        // ==================================================
 
         case "ice":
 
@@ -481,23 +604,45 @@ async function receberMensagem(
             break;
 
 
-        // ==========================================
+        // ==================================================
+        // PONG
+        // ==================================================
+
+        case "pong":
+
+            break;
+
+
+        // ==================================================
         // ERRO
-        // ==========================================
+        // ==================================================
 
         case "erro":
+
+            console.error(
+                mensagem.mensagem
+            );
+
 
             alert(
                 mensagem.mensagem
             );
 
             break;
+
+
+        default:
+
+            console.log(
+                "Evento desconhecido:",
+                mensagem
+            );
     }
 }
 
 
 // ======================================================
-// USUÁRIOS
+// USUÁRIOS ONLINE
 // ======================================================
 
 function atualizarUsuarios(
@@ -508,9 +653,7 @@ function atualizarUsuarios(
         "";
 
 
-    if (
-        lista.length === 0
-    ) {
+    if (!lista.length) {
 
         usuariosOnline.textContent =
             "Nenhum usuário online.";
@@ -532,10 +675,18 @@ function atualizarUsuarios(
                 "usuario-item";
 
 
-            item.textContent =
+            if (
                 usuario.id === meuId
-                    ? `${usuario.nome} (você)`
-                    : usuario.nome;
+            ) {
+
+                item.textContent =
+                    `${usuario.nome} (você)`;
+
+            } else {
+
+                item.textContent =
+                    usuario.nome;
+            }
 
 
             usuariosOnline.appendChild(
@@ -558,9 +709,7 @@ function atualizarTransmissoes(
         "";
 
 
-    if (
-        lista.length === 0
-    ) {
+    if (!lista.length) {
 
         transmissoesDiv.textContent =
             "Nenhuma transmissão ativa.";
@@ -597,12 +746,12 @@ function atualizarTransmissoes(
             );
 
 
-            // Não mostrar Assistir
-            // na própria transmissão
+            // Não exibe Assistir
+            // para a própria transmissão
 
             if (
                 transmissao.usuario_id !==
-                meuId
+                    meuId
             ) {
 
                 const botao =
@@ -611,18 +760,25 @@ function atualizarTransmissoes(
                     );
 
 
-                botao.textContent =
+                if (
                     transmissaoAtual ===
-                    transmissao.usuario_id
+                        transmissao.usuario_id
+                ) {
 
-                        ? "Conectando..."
+                    botao.textContent =
+                        "Conectando...";
 
-                        : "Assistir";
+                    botao.disabled =
+                        true;
 
+                } else {
 
-                botao.disabled =
-                    transmissaoAtual ===
-                    transmissao.usuario_id;
+                    botao.textContent =
+                        "Assistir";
+
+                    botao.disabled =
+                        false;
+                }
 
 
                 botao.addEventListener(
@@ -663,6 +819,7 @@ botaoTransmitir.addEventListener(
 async function iniciarTransmissao() {
 
     if (transmitindo) {
+
         return;
     }
 
@@ -699,24 +856,22 @@ async function iniciarTransmissao() {
                 });
 
 
-        const tracks =
-            streamLocal.getTracks();
-
-
         console.log(
             "Tracks capturadas:",
-            tracks.map(
-                track => ({
-                    tipo:
-                        track.kind,
+            streamLocal
+                .getTracks()
+                .map(
+                    track => ({
+                        tipo:
+                            track.kind,
 
-                    nome:
-                        track.label,
+                        nome:
+                            track.label,
 
-                    ativo:
-                        track.enabled
-                })
-            )
+                        ativo:
+                            track.enabled
+                    })
+                )
         );
 
 
@@ -724,7 +879,6 @@ async function iniciarTransmissao() {
             streamLocal;
 
 
-        // Evita ouvir o próprio áudio
         video.muted =
             true;
 
@@ -738,8 +892,10 @@ async function iniciarTransmissao() {
 
 
         enviarSocket({
+
             tipo:
                 "iniciar_transmissao"
+
         });
 
 
@@ -755,18 +911,15 @@ async function iniciarTransmissao() {
             "Transmitindo tela";
 
 
-        const trackVideo =
+        const videoTrack =
             streamLocal
                 .getVideoTracks()[0];
 
 
-        if (trackVideo) {
+        if (videoTrack) {
 
-            trackVideo.onended =
-                () => {
-
-                    pararTransmissao();
-                };
+            videoTrack.onended =
+                pararTransmissao;
         }
 
 
@@ -797,6 +950,7 @@ botaoParar.addEventListener(
 function pararTransmissao() {
 
     if (!transmitindo) {
+
         return;
     }
 
@@ -833,8 +987,10 @@ function pararTransmissao() {
 
 
     enviarSocket({
+
         tipo:
             "parar_transmissao"
+
     });
 
 
@@ -860,11 +1016,22 @@ function assistirTransmissao(
 ) {
 
     if (
-        transmissorId ===
-        meuId
+        transmissorId === meuId
     ) {
 
         return;
+    }
+
+
+    if (
+        transmissaoAtual &&
+        transmissaoAtual !==
+            transmissorId
+    ) {
+
+        fecharPeer(
+            transmissaoAtual
+        );
     }
 
 
@@ -883,6 +1050,7 @@ function assistirTransmissao(
 
         transmissor_id:
             transmissorId
+
     });
 }
 
@@ -898,7 +1066,7 @@ async function criarOfertaParaEspectador(
     if (!streamLocal) {
 
         console.log(
-            "Sem stream para transmitir"
+            "Sem stream para transmitir."
         );
 
         return;
@@ -951,11 +1119,12 @@ async function criarOfertaParaEspectador(
 
             offer:
                 peer.localDescription
+
         });
 
 
         console.log(
-            "Offer enviada para:",
+            "Offer enviada:",
             espectadorId
         );
 
@@ -971,7 +1140,7 @@ async function criarOfertaParaEspectador(
 
 
 // ======================================================
-// ESPECTADOR RECEBE OFFER
+// RECEBER OFFER
 // ======================================================
 
 async function receberOferta(
@@ -980,12 +1149,6 @@ async function receberOferta(
 
     const transmissorId =
         mensagem.origem;
-
-
-    console.log(
-        "Offer recebida de:",
-        transmissorId
-    );
 
 
     fecharPeer(
@@ -1003,6 +1166,7 @@ async function receberOferta(
     try {
 
         await peer.setRemoteDescription(
+
             new RTCSessionDescription(
                 mensagem.offer
             )
@@ -1010,7 +1174,7 @@ async function receberOferta(
 
 
         console.log(
-            "Offer aplicada"
+            "Offer aplicada."
         );
 
 
@@ -1038,6 +1202,7 @@ async function receberOferta(
 
             answer:
                 peer.localDescription
+
         });
 
 
@@ -1046,7 +1211,7 @@ async function receberOferta(
 
 
         console.log(
-            "Answer enviada"
+            "Answer enviada."
         );
 
 
@@ -1069,7 +1234,7 @@ async function receberOferta(
 
 
 // ======================================================
-// TRANSMISSOR RECEBE ANSWER
+// RECEBER ANSWER
 // ======================================================
 
 async function receberAnswer(
@@ -1089,7 +1254,7 @@ async function receberAnswer(
     if (!peer) {
 
         console.error(
-            "Peer não existe para answer:",
+            "Peer não encontrado para answer:",
             usuarioId
         );
 
@@ -1100,6 +1265,7 @@ async function receberAnswer(
     try {
 
         await peer.setRemoteDescription(
+
             new RTCSessionDescription(
                 mensagem.answer
             )
@@ -1144,6 +1310,7 @@ async function receberIce(
 
 
     if (!candidato) {
+
         return;
     }
 
@@ -1154,7 +1321,7 @@ async function receberIce(
         ];
 
 
-    // ICE chegou cedo
+    // ICE chegou antes da Offer/Answer
 
     if (
         !peer ||
@@ -1182,7 +1349,7 @@ async function receberIce(
 
 
         console.log(
-            "ICE armazenado temporariamente:",
+            "ICE pendente:",
             usuarioId
         );
 
@@ -1194,6 +1361,7 @@ async function receberIce(
     try {
 
         await peer.addIceCandidate(
+
             new RTCIceCandidate(
                 candidato
             )
@@ -1217,7 +1385,7 @@ async function receberIce(
 
 
 // ======================================================
-// CRIAR PEER
+// CRIAR PEER CONNECTION
 // ======================================================
 
 function criarPeer(
@@ -1242,62 +1410,61 @@ function criarPeer(
     );
 
 
-    // ==========================================
+    // ==================================================
     // ICE LOCAL
-    // ==========================================
+    // ==================================================
 
     peer.onicecandidate =
         evento => {
 
-            if (
-                evento.candidate
-            ) {
+            if (!evento.candidate) {
 
                 console.log(
-                    "ICE local:",
-                    {
-                        tipo:
-                            evento.candidate.type,
-
-                        protocolo:
-                            evento.candidate.protocol,
-
-                        endereco:
-                            evento.candidate.address,
-
-                        porta:
-                            evento.candidate.port
-                    }
+                    "ICE gathering finalizado."
                 );
 
-
-                enviarSocket({
-
-                    tipo:
-                        "ice",
-
-                    destino:
-                        usuarioId,
-
-                    candidate:
-                        evento.candidate.toJSON
-                            ? evento.candidate.toJSON()
-                            : evento.candidate
-                });
-
-
-            } else {
-
-                console.log(
-                    "ICE gathering finalizado"
-                );
+                return;
             }
+
+
+            console.log(
+                "ICE local:",
+                {
+                    tipo:
+                        evento.candidate.type,
+
+                    protocolo:
+                        evento.candidate.protocol,
+
+                    endereco:
+                        evento.candidate.address,
+
+                    porta:
+                        evento.candidate.port
+                }
+            );
+
+
+            enviarSocket({
+
+                tipo:
+                    "ice",
+
+                destino:
+                    usuarioId,
+
+                candidate:
+                    evento.candidate.toJSON
+                        ? evento.candidate.toJSON()
+                        : evento.candidate
+
+            });
         };
 
 
-    // ==========================================
-    // TRACK
-    // ==========================================
+    // ==================================================
+    // RECEBER STREAM
+    // ==================================================
 
     if (receberVideo) {
 
@@ -1335,37 +1502,28 @@ function criarPeer(
                     true;
 
 
-                const tentativa =
-                    video.play();
+                video.play()
+                    .then(
+                        () => {
+
+                            console.log(
+                                "Vídeo reproduzindo."
+                            );
+                        }
+                    )
+                    .catch(
+                        erro => {
+
+                            console.log(
+                                "Autoplay bloqueado:",
+                                erro
+                            );
 
 
-                if (tentativa) {
-
-                    tentativa
-                        .then(
-                            () => {
-
-                                console.log(
-                                    "Vídeo reproduzindo"
-                                );
-
-                            }
-                        )
-                        .catch(
-                            erro => {
-
-                                console.log(
-                                    "Autoplay bloqueado:",
-                                    erro
-                                );
-
-
-                                statusTexto.textContent =
-                                    "Transmissão conectada. " +
-                                    "Toque no vídeo para reproduzir.";
-                            }
-                        );
-                }
+                            statusTexto.textContent =
+                                "Conectado. Toque no vídeo.";
+                        }
+                    );
 
 
                 statusTexto.textContent =
@@ -1374,9 +1532,9 @@ function criarPeer(
     }
 
 
-    // ==========================================
-    // CONNECTION STATE
-    // ==========================================
+    // ==================================================
+    // ESTADO WEBRTC
+    // ==================================================
 
     peer.onconnectionstatechange =
         () => {
@@ -1393,10 +1551,13 @@ function criarPeer(
 
 
             if (
-                estado === "connected"
+                estado ===
+                    "connected"
             ) {
 
-                if (receberVideo) {
+                if (
+                    receberVideo
+                ) {
 
                     statusTexto.textContent =
                         "Assistindo transmissão";
@@ -1410,16 +1571,19 @@ function criarPeer(
 
 
             if (
-                estado === "failed"
+                estado ===
+                    "failed"
             ) {
 
                 console.error(
-                    "WebRTC FAILED:",
+                    "WEBRTC FAILED:",
                     usuarioId
                 );
 
 
-                if (receberVideo) {
+                if (
+                    receberVideo
+                ) {
 
                     transmissaoAtual =
                         null;
@@ -1432,49 +1596,36 @@ function criarPeer(
 
 
             if (
-                estado === "closed"
+                estado ===
+                    "disconnected"
             ) {
 
                 console.log(
-                    "Peer fechado:",
+                    "Peer desconectado:",
                     usuarioId
                 );
             }
         };
 
 
-    // ==========================================
-    // ICE CONNECTION
-    // ==========================================
+    // ==================================================
+    // ICE STATE
+    // ==================================================
 
     peer.oniceconnectionstatechange =
         () => {
 
-            const estado =
-                peer.iceConnectionState;
-
-
             console.log(
-                "ICE connection:",
+                "ICE:",
                 usuarioId,
-                estado
+                peer.iceConnectionState
             );
-
-
-            if (
-                estado === "failed"
-            ) {
-
-                console.error(
-                    "ICE FAILED"
-                );
-            }
         };
 
 
-    // ==========================================
+    // ==================================================
     // ICE GATHERING
-    // ==========================================
+    // ==================================================
 
     peer.onicegatheringstatechange =
         () => {
@@ -1487,9 +1638,9 @@ function criarPeer(
         };
 
 
-    // ==========================================
+    // ==================================================
     // SIGNALING
-    // ==========================================
+    // ==================================================
 
     peer.onsignalingstatechange =
         () => {
@@ -1550,6 +1701,7 @@ async function adicionarIcePendentes(
         try {
 
             await peer.addIceCandidate(
+
                 new RTCIceCandidate(
                     candidato
                 )
@@ -1557,7 +1709,7 @@ async function adicionarIcePendentes(
 
 
             console.log(
-                "ICE pendente adicionado"
+                "ICE pendente adicionado."
             );
 
 
@@ -1588,12 +1740,12 @@ function enviarSocket(
     if (
         !socket ||
         socket.readyState !==
-        WebSocket.OPEN
+            WebSocket.OPEN
     ) {
 
         console.error(
             "WebSocket não está aberto:",
-            dados.tipo
+            dados
         );
 
         return false;
@@ -1639,7 +1791,7 @@ function fecharPeer(
 
         } catch (erro) {
 
-            console.log(
+            console.error(
                 "Erro fechando peer:",
                 erro
             );
@@ -1679,3 +1831,18 @@ function fecharTodosPeers() {
     transmissaoAtual =
         null;
 }
+
+
+// ======================================================
+// LIMPEZA AO SAIR
+// ======================================================
+
+window.addEventListener(
+    "beforeunload",
+    () => {
+
+        pararHeartbeat();
+
+        fecharTodosPeers();
+    }
+);
