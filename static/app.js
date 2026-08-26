@@ -13,15 +13,11 @@ const partes = window.location.pathname
     .split("/")
     .filter(Boolean);
 
-
 const codigoSala =
     partes[1] || null;
 
 
-console.log(
-    "Sala:",
-    codigoSala
-);
+console.log("Sala:", codigoSala);
 
 
 // ======================================================
@@ -31,46 +27,35 @@ console.log(
 const nomeInput =
     document.getElementById("nome");
 
-
 const botaoEntrar =
     document.getElementById("entrar");
-
 
 const botaoTransmitir =
     document.getElementById("transmitir");
 
-
 const botaoParar =
     document.getElementById("parar");
-
 
 const botaoCopiar =
     document.getElementById("copiar-link");
 
-
 const entrada =
     document.getElementById("entrada");
-
 
 const painel =
     document.getElementById("painel");
 
-
 const usuariosOnline =
     document.getElementById("usuarios-online");
-
 
 const transmissoesDiv =
     document.getElementById("transmissoes");
 
-
 const statusTexto =
     document.getElementById("status");
 
-
 const codigoSalaTexto =
     document.getElementById("codigo-sala");
-
 
 const video =
     document.getElementById("video");
@@ -83,11 +68,9 @@ const video =
 let socket = null;
 
 let meuId = null;
-
 let meuNome = null;
 
 let streamLocal = null;
-
 let streamRemoto = null;
 
 let transmitindo = false;
@@ -96,9 +79,7 @@ let transmissaoAtual = null;
 
 let heartbeat = null;
 
-
 const peers = {};
-
 const icePendentes = {};
 
 
@@ -106,15 +87,13 @@ const icePendentes = {};
 // TURN - METERED
 // ======================================================
 //
-// COLOQUE AQUI SUAS CREDENCIAIS DA METERED.
+// COLOQUE AQUI AS SUAS CREDENCIAIS NOVAS DA METERED.
 //
-// Depois que o teste funcionar,
-// gere uma credencial nova antes de publicar.
+// NÃO publique a credencial definitiva no GitHub.
 //
 
 const TURN_USERNAME =
     "f3be97deaec9a7ada83c98f8";
-
 
 const TURN_CREDENTIAL =
     "WE4hYmTeprl6/ae2";
@@ -128,19 +107,10 @@ const configuracaoRTC = {
 
     iceServers: [
 
-        // ==============================================
-        // STUN
-        // ==============================================
-
         {
             urls:
                 "stun:stun.relay.metered.ca:80"
         },
-
-
-        // ==============================================
-        // TURN UDP 80
-        // ==============================================
 
         {
             urls:
@@ -153,10 +123,16 @@ const configuracaoRTC = {
                 TURN_CREDENTIAL
         },
 
+        {
+            urls:
+                "turn:global.relay.metered.ca:80?transport=udp",
 
-        // ==============================================
-        // TURN TCP 80
-        // ==============================================
+            username:
+                TURN_USERNAME,
+
+            credential:
+                TURN_CREDENTIAL
+        },
 
         {
             urls:
@@ -169,14 +145,9 @@ const configuracaoRTC = {
                 TURN_CREDENTIAL
         },
 
-
-        // ==============================================
-        // TURN 443
-        // ==============================================
-
         {
             urls:
-                "turn:global.relay.metered.ca:443",
+                "turn:global.relay.metered.ca:443?transport=tcp",
 
             username:
                 TURN_USERNAME,
@@ -184,11 +155,6 @@ const configuracaoRTC = {
             credential:
                 TURN_CREDENTIAL
         },
-
-
-        // ==============================================
-        // TURNS TCP 443
-        // ==============================================
 
         {
             urls:
@@ -203,22 +169,23 @@ const configuracaoRTC = {
 
     ],
 
-
-    // ==================================================
-    // TESTE:
-    // FORÇA O USO DO TURN
-    // ==================================================
+    // TESTE TURN:
+    // somente candidatos relay.
+    //
+    // Depois que funcionar,
+    // podemos voltar para "all".
 
     iceTransportPolicy:
         "relay",
 
-
     bundlePolicy:
         "max-bundle",
 
-
     rtcpMuxPolicy:
-        "require"
+        "require",
+
+    iceCandidatePoolSize:
+        4
 };
 
 
@@ -229,7 +196,7 @@ const configuracaoRTC = {
 function iniciarPagina() {
 
     console.log(
-        "APP.JS carregado corretamente"
+        "APP.JS carregado"
     );
 
 
@@ -250,20 +217,13 @@ function iniciarPagina() {
     }
 
 
-    if (!botaoEntrar) {
+    if (botaoEntrar) {
 
-        console.error(
-            "Botão #entrar não encontrado."
+        botaoEntrar.addEventListener(
+            "click",
+            conectar
         );
-
-        return;
     }
-
-
-    botaoEntrar.addEventListener(
-        "click",
-        conectar
-    );
 
 
     if (nomeInput) {
@@ -325,22 +285,19 @@ async function copiarConvite() {
         );
 
 
-        if (botaoCopiar) {
-
-            botaoCopiar.textContent =
-                "Link copiado!";
+        botaoCopiar.textContent =
+            "Link copiado!";
 
 
-            setTimeout(
-                () => {
+        setTimeout(
+            () => {
 
-                    botaoCopiar.textContent =
-                        "Copiar convite";
+                botaoCopiar.textContent =
+                    "Copiar convite";
 
-                },
-                2000
-            );
-        }
+            },
+            2000
+        );
 
 
     } catch (erro) {
@@ -365,26 +322,14 @@ async function copiarConvite() {
 function conectar() {
 
     console.log(
-        "Botão Entrar clicado"
+        "Entrando na sala..."
     );
 
 
     if (!codigoSala) {
 
-        if (statusTexto) {
-
-            statusTexto.textContent =
-                "Sala inválida.";
-        }
-
-        return;
-    }
-
-
-    if (!nomeInput) {
-
-        console.error(
-            "#nome não encontrado"
+        atualizarStatus(
+            "Sala inválida."
         );
 
         return;
@@ -392,7 +337,7 @@ function conectar() {
 
 
     const nome =
-        nomeInput.value.trim();
+        nomeInput?.value.trim();
 
 
     if (!nome) {
@@ -416,10 +361,6 @@ function conectar() {
         )
     ) {
 
-        console.log(
-            "WebSocket já conectado."
-        );
-
         return;
     }
 
@@ -428,15 +369,16 @@ function conectar() {
         nome;
 
 
-    botaoEntrar.disabled =
-        true;
+    if (botaoEntrar) {
 
-
-    if (statusTexto) {
-
-        statusTexto.textContent =
-            "Conectando à sala...";
+        botaoEntrar.disabled =
+            true;
     }
+
+
+    atualizarStatus(
+        "Conectando à sala..."
+    );
 
 
     const endereco =
@@ -444,7 +386,7 @@ function conectar() {
 
 
     console.log(
-        "Conectando WebSocket:",
+        "WebSocket:",
         endereco
     );
 
@@ -465,24 +407,21 @@ function conectar() {
         );
 
 
-        botaoEntrar.disabled =
-            false;
+        if (botaoEntrar) {
 
-
-        if (statusTexto) {
-
-            statusTexto.textContent =
-                "Erro ao conectar.";
+            botaoEntrar.disabled =
+                false;
         }
+
+
+        atualizarStatus(
+            "Erro ao conectar."
+        );
 
 
         return;
     }
 
-
-    // ==================================================
-    // WEBSOCKET ABERTO
-    // ==================================================
 
     socket.onopen =
         () => {
@@ -492,12 +431,10 @@ function conectar() {
             );
 
 
-            socket.send(
-                JSON.stringify({
-                    nome:
-                        meuNome
-                })
-            );
+            enviarSocket({
+                nome:
+                    meuNome
+            });
 
 
             if (entrada) {
@@ -514,20 +451,14 @@ function conectar() {
             }
 
 
-            if (statusTexto) {
-
-                statusTexto.textContent =
-                    `Conectado como ${meuNome}`;
-            }
+            atualizarStatus(
+                `Conectado como ${meuNome}`
+            );
 
 
             iniciarHeartbeat();
         };
 
-
-    // ==================================================
-    // WEBSOCKET ERRO
-    // ==================================================
 
     socket.onerror =
         erro => {
@@ -538,26 +469,23 @@ function conectar() {
             );
 
 
-            botaoEntrar.disabled =
-                false;
+            if (botaoEntrar) {
 
-
-            if (statusTexto) {
-
-                statusTexto.textContent =
-                    "Erro ao conectar ao servidor.";
+                botaoEntrar.disabled =
+                    false;
             }
+
+
+            atualizarStatus(
+                "Erro ao conectar ao servidor."
+            );
         };
 
-
-    // ==================================================
-    // WEBSOCKET FECHADO
-    // ==================================================
 
     socket.onclose =
         evento => {
 
-            console.log(
+            console.warn(
                 "WebSocket fechado:",
                 evento.code,
                 evento.reason
@@ -569,15 +497,16 @@ function conectar() {
             fecharTodosPeers();
 
 
-            botaoEntrar.disabled =
-                false;
+            if (botaoEntrar) {
 
-
-            if (statusTexto) {
-
-                statusTexto.textContent =
-                    "Desconectado do servidor.";
+                botaoEntrar.disabled =
+                    false;
             }
+
+
+            atualizarStatus(
+                "Desconectado do servidor."
+            );
         };
 
 
@@ -612,7 +541,7 @@ function iniciarHeartbeat() {
                 }
 
             },
-            30000
+            25000
         );
 }
 
@@ -678,10 +607,6 @@ async function receberMensagem(
         mensagem.tipo
     ) {
 
-        // ==================================================
-        // MEU ID
-        // ==================================================
-
         case "meu_id":
 
             meuId =
@@ -697,30 +622,20 @@ async function receberMensagem(
             break;
 
 
-        // ==================================================
-        // ESTADO DA SALA
-        // ==================================================
-
         case "estado":
 
             atualizarUsuarios(
-                mensagem.usuarios ||
-                []
+                mensagem.usuarios || []
             );
 
 
             atualizarTransmissoes(
-                mensagem.transmissoes ||
-                []
+                mensagem.transmissoes || []
             );
 
 
             break;
 
-
-        // ==================================================
-        // NOVO ESPECTADOR
-        // ==================================================
 
         case "novo_espectador":
 
@@ -731,11 +646,6 @@ async function receberMensagem(
 
 
             if (!transmitindo) {
-
-                console.log(
-                    "Não estou transmitindo."
-                );
-
 
                 return;
             }
@@ -748,10 +658,6 @@ async function receberMensagem(
 
             break;
 
-
-        // ==================================================
-        // OFFER
-        // ==================================================
 
         case "offer":
 
@@ -769,10 +675,6 @@ async function receberMensagem(
             break;
 
 
-        // ==================================================
-        // ANSWER
-        // ==================================================
-
         case "answer":
 
             console.log(
@@ -789,10 +691,6 @@ async function receberMensagem(
             break;
 
 
-        // ==================================================
-        // ICE
-        // ==================================================
-
         case "ice":
 
             await receberIce(
@@ -803,23 +701,10 @@ async function receberMensagem(
             break;
 
 
-        // ==================================================
-        // PONG
-        // ==================================================
-
         case "pong":
-
-            console.log(
-                "PONG"
-            );
-
 
             break;
 
-
-        // ==================================================
-        // ERRO
-        // ==================================================
 
         case "erro":
 
@@ -829,29 +714,41 @@ async function receberMensagem(
             );
 
 
-            if (statusTexto) {
-
-                statusTexto.textContent =
-                    mensagem.mensagem ||
-                    "Erro no servidor.";
-            }
+            atualizarStatus(
+                mensagem.mensagem ||
+                "Erro no servidor."
+            );
 
 
             break;
-
-
-        default:
-
-            console.log(
-                "Evento desconhecido:",
-                mensagem
-            );
     }
 }
 
 
 // ======================================================
-// USUÁRIOS ONLINE
+// STATUS
+// ======================================================
+
+function atualizarStatus(
+    texto
+) {
+
+    console.log(
+        "STATUS:",
+        texto
+    );
+
+
+    if (statusTexto) {
+
+        statusTexto.textContent =
+            texto;
+    }
+}
+
+
+// ======================================================
+// USUÁRIOS
 // ======================================================
 
 function atualizarUsuarios(
@@ -868,14 +765,10 @@ function atualizarUsuarios(
         "";
 
 
-    if (
-        !lista ||
-        lista.length === 0
-    ) {
+    if (!lista.length) {
 
         usuariosOnline.textContent =
             "Nenhum usuário online.";
-
 
         return;
     }
@@ -894,19 +787,10 @@ function atualizarUsuarios(
                 "usuario-item";
 
 
-            if (
-                usuario.id ===
-                    meuId
-            ) {
-
-                item.textContent =
-                    `${usuario.nome} (você)`;
-
-            } else {
-
-                item.textContent =
-                    usuario.nome;
-            }
+            item.textContent =
+                usuario.id === meuId
+                    ? `${usuario.nome} (você)`
+                    : usuario.nome;
 
 
             usuariosOnline.appendChild(
@@ -935,14 +819,10 @@ function atualizarTransmissoes(
         "";
 
 
-    if (
-        !lista ||
-        lista.length === 0
-    ) {
+    if (!lista.length) {
 
         transmissoesDiv.textContent =
             "Nenhuma transmissão ativa.";
-
 
         return;
     }
@@ -988,11 +868,15 @@ function atualizarTransmissoes(
 
 
                 botao.textContent =
-                    "Assistir";
+                    transmissaoAtual ===
+                    transmissao.usuario_id
+                        ? "Conectando..."
+                        : "Assistir";
 
 
                 botao.disabled =
-                    false;
+                    transmissaoAtual ===
+                    transmissao.usuario_id;
 
 
                 botao.addEventListener(
@@ -1038,12 +922,9 @@ async function iniciarTransmissao() {
             WebSocket.OPEN
     ) {
 
-        if (statusTexto) {
-
-            statusTexto.textContent =
-                "Entre na sala primeiro.";
-        }
-
+        atualizarStatus(
+            "Entre na sala primeiro."
+        );
 
         return;
     }
@@ -1055,12 +936,9 @@ async function iniciarTransmissao() {
             .getDisplayMedia
     ) {
 
-        if (statusTexto) {
-
-            statusTexto.textContent =
-                "Seu navegador não permite compartilhar tela.";
-        }
-
+        atualizarStatus(
+            "Seu navegador não permite compartilhar tela."
+        );
 
         return;
     }
@@ -1075,12 +953,8 @@ async function iniciarTransmissao() {
                     video: {
 
                         frameRate: {
-
-                            ideal:
-                                30,
-
-                            max:
-                                60
+                            ideal: 30,
+                            max: 60
                         }
                     },
 
@@ -1090,26 +964,16 @@ async function iniciarTransmissao() {
 
 
         console.log(
-            "STREAM:",
-            streamLocal
-        );
-
-
-        console.log(
-            "TRACKS:",
+            "Tracks:",
             streamLocal
                 .getTracks()
                 .map(
                     track => ({
-
                         kind:
                             track.kind,
 
                         label:
-                            track.label,
-
-                        enabled:
-                            track.enabled
+                            track.label
                     })
                 )
         );
@@ -1129,18 +993,8 @@ async function iniciarTransmissao() {
                 true;
 
 
-            try {
-
-                await video.play();
-
-
-            } catch (erro) {
-
-                console.log(
-                    "Preview bloqueado:",
-                    erro
-                );
-            }
+            await video.play()
+                .catch(() => {});
         }
 
 
@@ -1149,10 +1003,8 @@ async function iniciarTransmissao() {
 
 
         enviarSocket({
-
             tipo:
                 "iniciar_transmissao"
-
         });
 
 
@@ -1170,11 +1022,9 @@ async function iniciarTransmissao() {
         }
 
 
-        if (statusTexto) {
-
-            statusTexto.textContent =
-                "Transmitindo tela";
-        }
+        atualizarStatus(
+            "Transmitindo tela"
+        );
 
 
         const videoTrack =
@@ -1192,22 +1042,20 @@ async function iniciarTransmissao() {
     } catch (erro) {
 
         console.error(
-            "Erro ao compartilhar:",
+            "Erro getDisplayMedia:",
             erro
         );
 
 
-        if (statusTexto) {
-
-            statusTexto.textContent =
-                "Erro ao iniciar transmissão.";
-        }
+        atualizarStatus(
+            "Erro ao iniciar transmissão."
+        );
     }
 }
 
 
 // ======================================================
-// PARAR TRANSMISSÃO
+// PARAR
 // ======================================================
 
 function pararTransmissao() {
@@ -1232,7 +1080,6 @@ function pararTransmissao() {
                     track.onended =
                         null;
 
-
                     track.stop();
                 }
             );
@@ -1254,10 +1101,8 @@ function pararTransmissao() {
 
 
     enviarSocket({
-
         tipo:
             "parar_transmissao"
-
     });
 
 
@@ -1275,11 +1120,9 @@ function pararTransmissao() {
     }
 
 
-    if (statusTexto) {
-
-        statusTexto.textContent =
-            "Transmissão encerrada";
-    }
+    atualizarStatus(
+        "Transmissão encerrada"
+    );
 }
 
 
@@ -1290,12 +1133,6 @@ function pararTransmissao() {
 function assistirTransmissao(
     transmissorId
 ) {
-
-    console.log(
-        "ASSISTIR:",
-        transmissorId
-    );
-
 
     if (
         !transmissorId ||
@@ -1313,12 +1150,9 @@ function assistirTransmissao(
             WebSocket.OPEN
     ) {
 
-        if (statusTexto) {
-
-            statusTexto.textContent =
-                "Servidor desconectado.";
-        }
-
+        atualizarStatus(
+            "Servidor desconectado."
+        );
 
         return;
     }
@@ -1349,25 +1183,20 @@ function assistirTransmissao(
         video.srcObject =
             streamRemoto;
 
-
         video.muted =
             false;
 
-
         video.autoplay =
             true;
-
 
         video.controls =
             true;
     }
 
 
-    if (statusTexto) {
-
-        statusTexto.textContent =
-            "Conectando à transmissão...";
-    }
+    atualizarStatus(
+        "Conectando à transmissão..."
+    );
 
 
     enviarSocket({
@@ -1377,31 +1206,19 @@ function assistirTransmissao(
 
         transmissor_id:
             transmissorId
-
     });
 }
 
 
 // ======================================================
-// CRIAR OFFER
+// OFFER
 // ======================================================
 
 async function criarOfertaParaEspectador(
     espectadorId
 ) {
 
-    console.log(
-        "Criando OFFER para:",
-        espectadorId
-    );
-
-
     if (!streamLocal) {
-
-        console.error(
-            "Sem stream local."
-        );
-
 
         return;
     }
@@ -1443,11 +1260,6 @@ async function criarOfertaParaEspectador(
         );
 
 
-        console.log(
-            "OFFER criada."
-        );
-
-
         enviarSocket({
 
             tipo:
@@ -1458,7 +1270,6 @@ async function criarOfertaParaEspectador(
 
             offer:
                 peer.localDescription
-
         });
 
 
@@ -1490,12 +1301,6 @@ async function receberOferta(
         mensagem.origem;
 
 
-    console.log(
-        "Processando OFFER:",
-        transmissorId
-    );
-
-
     fecharPeer(
         transmissorId
     );
@@ -1522,7 +1327,6 @@ async function receberOferta(
     try {
 
         await peer.setRemoteDescription(
-
             new RTCSessionDescription(
                 mensagem.offer
             )
@@ -1530,7 +1334,7 @@ async function receberOferta(
 
 
         console.log(
-            "RemoteDescription OFFER OK"
+            "OFFER aplicada."
         );
 
 
@@ -1558,7 +1362,6 @@ async function receberOferta(
 
             answer:
                 peer.localDescription
-
         });
 
 
@@ -1567,17 +1370,15 @@ async function receberOferta(
         );
 
 
-        if (statusTexto) {
-
-            statusTexto.textContent =
-                "Recebendo transmissão...";
-        }
+        atualizarStatus(
+            "Recebendo transmissão..."
+        );
 
 
     } catch (erro) {
 
         console.error(
-            "Erro processando OFFER:",
+            "Erro OFFER:",
             erro
         );
 
@@ -1586,11 +1387,9 @@ async function receberOferta(
             null;
 
 
-        if (statusTexto) {
-
-            statusTexto.textContent =
-                "Erro ao conectar à transmissão.";
-        }
+        atualizarStatus(
+            "Erro ao conectar à transmissão."
+        );
     }
 }
 
@@ -1620,7 +1419,6 @@ async function receberAnswer(
             usuarioId
         );
 
-
         return;
     }
 
@@ -1632,18 +1430,16 @@ async function receberAnswer(
                 "have-local-offer"
         ) {
 
-            console.log(
+            console.warn(
                 "ANSWER ignorada:",
                 peer.signalingState
             );
-
 
             return;
         }
 
 
         await peer.setRemoteDescription(
-
             new RTCSessionDescription(
                 mensagem.answer
             )
@@ -1728,7 +1524,7 @@ async function receberIce(
 
 
         console.log(
-            "ICE guardado:",
+            "ICE pendente:",
             usuarioId
         );
 
@@ -1740,7 +1536,6 @@ async function receberIce(
     try {
 
         await peer.addIceCandidate(
-
             new RTCIceCandidate(
                 candidato
             )
@@ -1756,7 +1551,7 @@ async function receberIce(
     } catch (erro) {
 
         console.error(
-            "Erro ICE:",
+            "Erro ICE remoto:",
             erro
         );
     }
@@ -1790,29 +1585,71 @@ function criarPeer(
 
 
     // ==================================================
-    // ERRO DE ICE SERVER
+    // ERRO DO TURN / ICE
     // ==================================================
 
     peer.onicecandidateerror =
         evento => {
 
+            const erroIce = {
+
+                url:
+                    evento.url || null,
+
+                codigo:
+                    evento.errorCode || null,
+
+                texto:
+                    evento.errorText || null,
+
+                hostCandidate:
+                    evento.hostCandidate || null
+            };
+
+
+            // Assim o Chrome NÃO mostra só "Object".
+
             console.error(
                 "ERRO ICE SERVER:",
-                {
-
-                    url:
-                        evento.url,
-
-                    codigo:
-                        evento.errorCode,
-
-                    texto:
-                        evento.errorText,
-
-                    hostCandidate:
-                        evento.hostCandidate
-                }
+                JSON.stringify(
+                    erroIce,
+                    null,
+                    2
+                )
             );
+
+
+            if (
+                evento.errorCode ===
+                    401
+            ) {
+
+                console.error(
+                    "TURN recusou usuário/senha."
+                );
+            }
+
+
+            if (
+                evento.errorCode ===
+                    438
+            ) {
+
+                console.error(
+                    "Credencial TURN expirada."
+                );
+            }
+
+
+            if (
+                evento.errorCode ===
+                    701
+            ) {
+
+                console.error(
+                    "Servidor TURN não pôde ser alcançado."
+                );
+            }
         };
 
 
@@ -1826,34 +1663,50 @@ function criarPeer(
             if (!evento.candidate) {
 
                 console.log(
-                    "ICE gathering completo."
+                    "ICE gathering finalizado."
                 );
-
 
                 return;
             }
 
 
+            const candidato =
+                evento.candidate;
+
+
             console.log(
                 "ICE LOCAL:",
-                {
+                JSON.stringify(
+                    {
 
-                    tipo:
-                        evento.candidate.type,
+                        tipo:
+                            candidato.type,
 
-                    protocolo:
-                        evento.candidate.protocol,
+                        protocolo:
+                            candidato.protocol,
 
-                    endereco:
-                        evento.candidate.address,
+                        endereco:
+                            candidato.address,
 
-                    porta:
-                        evento.candidate.port,
+                        porta:
+                            candidato.port
 
-                    candidate:
-                        evento.candidate.candidate
-                }
+                    },
+                    null,
+                    2
+                )
             );
+
+
+            if (
+                candidato.type ===
+                    "relay"
+            ) {
+
+                console.log(
+                    "✅ TURN RELAY OBTIDO"
+                );
+            }
 
 
             enviarSocket({
@@ -1865,16 +1718,15 @@ function criarPeer(
                     usuarioId,
 
                 candidate:
-                    evento.candidate.toJSON
-                        ? evento.candidate.toJSON()
-                        : evento.candidate
-
+                    candidato.toJSON
+                        ? candidato.toJSON()
+                        : candidato
             });
         };
 
 
     // ==================================================
-    // RECEBER TRACK
+    // TRACK
     // ==================================================
 
     if (receberVideo) {
@@ -1932,77 +1784,54 @@ function criarPeer(
 
 
                     video.play()
-                        .then(
-                            () => {
-
-                                console.log(
-                                    "Vídeo reproduzindo."
-                                );
-                            }
-                        )
                         .catch(
                             erro => {
 
-                                console.log(
-                                    "Autoplay:",
+                                console.warn(
+                                    "Autoplay bloqueado:",
                                     erro
                                 );
 
 
-                                if (statusTexto) {
-
-                                    statusTexto.textContent =
-                                        "Conectado. Toque no vídeo.";
-                                }
+                                atualizarStatus(
+                                    "Conectado. Clique no vídeo."
+                                );
                             }
                         );
-                }
-
-
-                if (statusTexto) {
-
-                    statusTexto.textContent =
-                        "Assistindo transmissão";
                 }
             };
     }
 
 
     // ==================================================
-    // ESTADO WEBRTC
+    // WEBRTC STATE
     // ==================================================
 
     peer.onconnectionstatechange =
         () => {
 
-            const estado =
-                peer.connectionState;
-
-
             console.log(
                 "WEBRTC:",
                 usuarioId,
-                estado
+                peer.connectionState
             );
 
 
             if (
-                estado ===
+                peer.connectionState ===
                     "connected"
             ) {
 
-                if (statusTexto) {
-
-                    statusTexto.textContent =
-                        receberVideo
-                            ? "Assistindo transmissão"
-                            : "Espectador conectado";
-                }
+                atualizarStatus(
+                    receberVideo
+                        ? "Assistindo transmissão"
+                        : "Espectador conectado"
+                );
             }
 
 
             if (
-                estado ===
+                peer.connectionState ===
                     "failed"
             ) {
 
@@ -2018,46 +1847,20 @@ function criarPeer(
                         null;
 
 
-                    if (statusTexto) {
-
-                        statusTexto.textContent =
-                            "Falha ao conectar à transmissão.";
-                    }
+                    atualizarStatus(
+                        "Falha ao conectar à transmissão."
+                    );
                 }
-            }
-
-
-            if (
-                estado ===
-                    "disconnected"
-            ) {
-
-                console.warn(
-                    "WEBRTC desconectado:",
-                    usuarioId
-                );
-            }
-
-
-            if (
-                estado ===
-                    "closed"
-            ) {
-
-                console.log(
-                    "WEBRTC fechado:",
-                    usuarioId
-                );
             }
         };
 
 
     // ==================================================
-    // ICE CONNECTION STATE
+    // ICE STATE
     // ==================================================
 
     peer.oniceconnectionstatechange =
-        () => {
+        async () => {
 
             const estado =
                 peer.iceConnectionState;
@@ -2072,25 +1875,24 @@ function criarPeer(
 
             if (
                 estado ===
-                    "failed"
-            ) {
-
-                console.error(
-                    "ICE FAILED:",
-                    usuarioId
-                );
-            }
-
-
-            if (
-                estado ===
                     "connected" ||
                 estado ===
                     "completed"
             ) {
 
                 console.log(
-                    "ICE CONECTADO:",
+                    "✅ ICE CONECTADO"
+                );
+            }
+
+
+            if (
+                estado ===
+                    "failed"
+            ) {
+
+                console.error(
+                    "ICE FAILED:",
                     usuarioId
                 );
             }
@@ -2175,7 +1977,6 @@ async function adicionarIcePendentes(
         try {
 
             await peer.addIceCandidate(
-
                 new RTCIceCandidate(
                     candidato
                 )
@@ -2204,7 +2005,7 @@ async function adicionarIcePendentes(
 
 
 // ======================================================
-// ENVIAR WEBSOCKET
+// ENVIAR SOCKET
 // ======================================================
 
 function enviarSocket(
@@ -2242,7 +2043,7 @@ function enviarSocket(
     } catch (erro) {
 
         console.error(
-            "Erro enviando socket:",
+            "Erro enviando WebSocket:",
             erro
         );
 
@@ -2273,26 +2074,20 @@ function fecharPeer(
             peer.onicecandidate =
                 null;
 
-
             peer.onicecandidateerror =
                 null;
-
 
             peer.ontrack =
                 null;
 
-
             peer.onconnectionstatechange =
                 null;
-
 
             peer.oniceconnectionstatechange =
                 null;
 
-
             peer.onicegatheringstatechange =
                 null;
-
 
             peer.onsignalingstatechange =
                 null;
@@ -2350,7 +2145,7 @@ function fecharTodosPeers() {
 
 
 // ======================================================
-// SAIR DA PÁGINA
+// SAIR
 // ======================================================
 
 window.addEventListener(
