@@ -7,12 +7,21 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 
+# ======================================================
+# VARIÁVEIS DE AMBIENTE
+# ======================================================
+
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-BASE_URL = "https://bot-para-transmi-o.vercel.app"
+# TROQUE pela URL do seu Render
+BASE_URL = "https://SEU-PROJETO.onrender.com"
 
+
+# ======================================================
+# BOT
+# ======================================================
 
 intents = discord.Intents.default()
 
@@ -22,8 +31,13 @@ bot = commands.Bot(
 )
 
 
+# ======================================================
+# BOT ONLINE
+# ======================================================
+
 @bot.event
 async def on_ready():
+
     print("==============================")
     print(f"BOT ONLINE: {bot.user}")
     print("==============================")
@@ -42,6 +56,10 @@ async def on_ready():
         )
 
 
+# ======================================================
+# COMANDO /criar-sala
+# ======================================================
+
 @bot.tree.command(
     name="criar-sala",
     description="Cria uma sala de compartilhamento de tela"
@@ -49,12 +67,14 @@ async def on_ready():
 async def criar_sala(
     interaction: discord.Interaction
 ):
+
     # Responde ao Discord imediatamente
     await interaction.response.defer()
 
     try:
+
         timeout = aiohttp.ClientTimeout(
-            total=15
+            total=30
         )
 
         async with aiohttp.ClientSession(
@@ -73,36 +93,57 @@ async def criar_sala(
             ) as resposta:
 
                 print(
-                    "STATUS VERCEL:",
+                    "STATUS RENDER:",
                     resposta.status
                 )
 
                 texto = await resposta.text()
 
                 print(
-                    "RESPOSTA VERCEL:",
+                    "RESPOSTA RENDER:",
                     texto
                 )
+
+                # ======================================
+                # ERRO HTTP
+                # ======================================
 
                 if resposta.status != 200:
 
                     await interaction.followup.send(
-                        f"❌ Não foi possível criar a sala. "
+                        f"❌ Não foi possível criar a sala.\n"
                         f"Status: {resposta.status}"
                     )
 
                     return
 
+
+                # ======================================
+                # JSON
+                # ======================================
+
                 try:
+
                     dados = await resposta.json()
 
-                except Exception:
+                except Exception as erro:
+
+                    print(
+                        "Erro lendo JSON:",
+                        repr(erro)
+                    )
+
                     await interaction.followup.send(
-                        "❌ A Vercel respondeu, "
+                        "❌ O servidor respondeu, "
                         "mas a resposta não veio em JSON."
                     )
 
                     return
+
+
+                # ======================================
+                # CÓDIGO DA SALA
+                # ======================================
 
                 codigo = dados.get(
                     "codigo"
@@ -111,14 +152,25 @@ async def criar_sala(
                 if not codigo:
 
                     await interaction.followup.send(
-                        "❌ A sala não retornou um código válido."
+                        "❌ A sala não retornou "
+                        "um código válido."
                     )
 
                     return
 
+
+                # ======================================
+                # LINK
+                # ======================================
+
                 link = (
                     f"{BASE_URL}/sala/{codigo}"
                 )
+
+
+                # ======================================
+                # MENSAGEM DISCORD
+                # ======================================
 
                 mensagem = (
                     "🎥 **Sala criada!**\n\n"
@@ -129,10 +181,15 @@ async def criar_sala(
                     "pode entrar, assistir ou transmitir."
                 )
 
+
                 await interaction.followup.send(
                     mensagem
                 )
 
+
+    # ==================================================
+    # ERRO HTTP
+    # ==================================================
 
     except aiohttp.ClientError as erro:
 
@@ -143,9 +200,30 @@ async def criar_sala(
 
         await interaction.followup.send(
             "❌ Não consegui conectar "
-            "ao Screen Share."
+            "ao servidor do Screen Share."
         )
 
+
+    # ==================================================
+    # TIMEOUT
+    # ==================================================
+
+    except TimeoutError as erro:
+
+        print(
+            "TIMEOUT:",
+            repr(erro)
+        )
+
+        await interaction.followup.send(
+            "❌ O servidor demorou demais "
+            "para responder."
+        )
+
+
+    # ==================================================
+    # OUTRO ERRO
+    # ==================================================
 
     except Exception as erro:
 
@@ -159,10 +237,19 @@ async def criar_sala(
         )
 
 
+# ======================================================
+# VERIFICAR TOKEN
+# ======================================================
+
 if not TOKEN:
+
     raise ValueError(
         "DISCORD_TOKEN não encontrado no arquivo .env"
     )
 
+
+# ======================================================
+# INICIAR BOT
+# ======================================================
 
 bot.run(TOKEN)
