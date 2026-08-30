@@ -107,28 +107,8 @@ const icePendentes = {};
 //
 //     GET /api/turn-credentials
 //
-// Formatos aceitos da resposta:
-//
-// 1) Array direto:
-// [
-//   { "urls": ["stun:stun.cloudflare.com:3478"] },
-//   {
-//     "urls": [
-//       "turn:turn.cloudflare.com:3478?transport=udp",
-//       "turn:turn.cloudflare.com:3478?transport=tcp",
-//       "turn:turn.cloudflare.com:80?transport=tcp",
-//       "turns:turn.cloudflare.com:5349?transport=tcp",
-//       "turns:turn.cloudflare.com:443?transport=tcp"
-//     ],
-//     "username": "...",
-//     "credential": "..."
-//   }
-// ]
-//
-// 2) Objeto:
-// { "iceServers": [ ... ] }
-//
-// Enquanto o TURN não estiver carregado, usamos STUN como fallback.
+// Enquanto o TURN não estiver carregado,
+// usamos STUN como fallback.
 //
 
 let iceServersAtuais = [
@@ -156,16 +136,18 @@ const configuracaoRTC = {
 };
 
 
+// ======================================================
+// CARREGAR CLOUDFLARE TURN
+// ======================================================
+
 async function carregarIceServersCloudflare() {
 
     const endpoint =
         `${BASE_URL}/api/turn-credentials`;
 
-
     console.log(
         "Buscando credenciais TURN temporárias..."
     );
-
 
     try {
 
@@ -310,11 +292,13 @@ function iniciarPagina() {
     }
 
 
+    // CORREÇÃO:
+    // não passar MouseEvent para conectar()
     if (botaoEntrar) {
 
         botaoEntrar.addEventListener(
             "click",
-            conectar
+            () => conectar(false)
         );
     }
 
@@ -330,7 +314,7 @@ function iniciarPagina() {
                     "Enter"
                 ) {
 
-                    conectar();
+                    conectar(false);
                 }
             }
         );
@@ -415,7 +399,15 @@ async function copiarConvite() {
 // ENTRAR NA SALA
 // ======================================================
 
-async function conectar(reconexaoAutomatica = false) {
+async function conectar(
+    reconexaoAutomatica = false
+) {
+
+    // Garante que somente true literal
+    // seja tratado como reconexão.
+    reconexaoAutomatica =
+        reconexaoAutomatica === true;
+
 
     console.log(
         "Entrando na sala..."
@@ -445,9 +437,10 @@ async function conectar(reconexaoAutomatica = false) {
     }
 
 
-    const nome = reconexaoAutomatica
-        ? (meuNome || "").trim()
-        : nomeInput.value.trim();
+    const nome =
+        reconexaoAutomatica
+            ? (meuNome || "").trim()
+            : nomeInput.value.trim();
 
 
     if (!nome) {
@@ -540,6 +533,10 @@ async function conectar(reconexaoAutomatica = false) {
     }
 
 
+    // ==================================================
+    // WEBSOCKET ABERTO
+    // ==================================================
+
     socket.onopen =
         () => {
 
@@ -555,6 +552,7 @@ async function conectar(reconexaoAutomatica = false) {
 
             tentativasReconexaoSocket =
                 0;
+
 
             cancelarReconexaoSocket();
 
@@ -591,6 +589,8 @@ async function conectar(reconexaoAutomatica = false) {
             iniciarHeartbeat();
 
 
+            // Se estava transmitindo antes da queda
+            // do signaling, anuncia novamente.
             if (
                 reconexaoAutomatica &&
                 transmitindo &&
@@ -611,6 +611,10 @@ async function conectar(reconexaoAutomatica = false) {
             }
         };
 
+
+    // ==================================================
+    // ERRO WEBSOCKET
+    // ==================================================
 
     socket.onerror =
         erro => {
@@ -637,6 +641,10 @@ async function conectar(reconexaoAutomatica = false) {
         };
 
 
+    // ==================================================
+    // WEBSOCKET FECHADO
+    // ==================================================
+
     socket.onclose =
         evento => {
 
@@ -651,14 +659,11 @@ async function conectar(reconexaoAutomatica = false) {
 
 
             /*
-             * IMPORTANTE:
+             * NÃO fechamos os peers WebRTC aqui.
              *
-             * NÃO chamamos fecharTodosPeers()
-             * aqui.
-             *
-             * Se o signaling cair por alguns
-             * segundos, o WebRTC pode continuar
-             * funcionando normalmente.
+             * Uma queda temporária do servidor
+             * de signaling não precisa derrubar
+             * a transmissão P2P/TURN que já existe.
              */
 
 
@@ -683,6 +688,10 @@ async function conectar(reconexaoAutomatica = false) {
             agendarReconexaoSocket();
         };
 
+
+    // ==================================================
+    // MENSAGEM WEBSOCKET
+    // ==================================================
 
     socket.onmessage =
         receberMensagem;
@@ -860,7 +869,6 @@ function pararHeartbeat() {
         null;
 }
 
-
 // ======================================================
 // RECEBER WEBSOCKET
 // ======================================================
@@ -871,14 +879,12 @@ async function receberMensagem(
 
     let mensagem;
 
-
     try {
 
         mensagem =
             JSON.parse(
                 evento.data
             );
-
 
     } catch (erro) {
 
@@ -887,7 +893,6 @@ async function receberMensagem(
             evento.data,
             erro
         );
-
 
         return;
     }
@@ -909,12 +914,10 @@ async function receberMensagem(
             meuId =
                 mensagem.id;
 
-
             console.log(
                 "Meu ID:",
                 meuId
             );
-
 
             break;
 
@@ -926,12 +929,10 @@ async function receberMensagem(
                 []
             );
 
-
             atualizarTransmissoes(
                 mensagem.transmissoes ||
                 []
             );
-
 
             break;
 
@@ -958,7 +959,6 @@ async function receberMensagem(
                 mensagem.espectador_id
             );
 
-
             break;
 
 
@@ -969,11 +969,9 @@ async function receberMensagem(
                 mensagem.origem
             );
 
-
             await receberOferta(
                 mensagem
             );
-
 
             break;
 
@@ -985,11 +983,9 @@ async function receberMensagem(
                 mensagem.origem
             );
 
-
             await receberAnswer(
                 mensagem
             );
-
 
             break;
 
@@ -1000,7 +996,6 @@ async function receberMensagem(
                 mensagem
             );
 
-
             break;
 
 
@@ -1009,7 +1004,6 @@ async function receberMensagem(
             console.log(
                 "PONG"
             );
-
 
             break;
 
@@ -1021,12 +1015,10 @@ async function receberMensagem(
                 mensagem.mensagem
             );
 
-
             atualizarStatus(
                 mensagem.mensagem ||
                 "Erro no servidor."
             );
-
 
             break;
 
@@ -1067,7 +1059,6 @@ function atualizarUsuarios(
         usuariosOnline.textContent =
             "Nenhum usuário online.";
 
-
         return;
     }
 
@@ -1087,7 +1078,7 @@ function atualizarUsuarios(
 
             if (
                 usuario.id ===
-                    meuId
+                meuId
             ) {
 
                 item.textContent =
@@ -1134,7 +1125,6 @@ function atualizarTransmissoes(
         transmissoesDiv.textContent =
             "Nenhuma transmissão ativa.";
 
-
         return;
     }
 
@@ -1169,7 +1159,7 @@ function atualizarTransmissoes(
 
             if (
                 transmissao.usuario_id !==
-                    meuId
+                meuId
             ) {
 
                 const botao =
@@ -1180,7 +1170,7 @@ function atualizarTransmissoes(
 
                 if (
                     transmissaoAtual ===
-                        transmissao.usuario_id
+                    transmissao.usuario_id
                 ) {
 
                     botao.textContent =
@@ -1246,7 +1236,6 @@ async function iniciarTransmissao() {
             "Entre na sala primeiro."
         );
 
-
         return;
     }
 
@@ -1260,7 +1249,6 @@ async function iniciarTransmissao() {
         atualizarStatus(
             "Seu navegador não permite compartilhar tela."
         );
-
 
         return;
     }
@@ -1314,10 +1302,8 @@ async function iniciarTransmissao() {
             video.srcObject =
                 streamLocal;
 
-
             video.muted =
                 true;
-
 
             video.autoplay =
                 true;
@@ -1421,7 +1407,6 @@ function pararTransmissao() {
                     track.onended =
                         null;
 
-
                     track.stop();
                 }
             );
@@ -1504,7 +1489,6 @@ function assistirTransmissao(
             "Servidor desconectado."
         );
 
-
         return;
     }
 
@@ -1534,14 +1518,11 @@ function assistirTransmissao(
         video.srcObject =
             streamRemoto;
 
-
         video.muted =
             false;
 
-
         video.autoplay =
             true;
-
 
         video.controls =
             true;
@@ -1584,7 +1565,6 @@ async function criarOfertaParaEspectador(
         console.error(
             "Sem stream local."
         );
-
 
         return;
     }
@@ -1799,7 +1779,6 @@ async function receberAnswer(
             usuarioId
         );
 
-
         return;
     }
 
@@ -1815,7 +1794,6 @@ async function receberAnswer(
                 "ANSWER ignorada:",
                 peer.signalingState
             );
-
 
             return;
         }
@@ -1910,7 +1888,6 @@ async function receberIce(
             "ICE guardado:",
             usuarioId
         );
-
 
         return;
     }
@@ -2127,9 +2104,9 @@ async function recuperarPeer(
     }
 
 
-    // ===============================================
+    // ==================================================
     // TRANSMISSOR
-    // ===============================================
+    // ==================================================
 
     if (
         !receberVideo &&
@@ -2192,9 +2169,9 @@ async function recuperarPeer(
     }
 
 
-    // ===============================================
+    // ==================================================
     // ESPECTADOR
-    // ===============================================
+    // ==================================================
 
     if (receberVideo) {
 
@@ -2233,7 +2210,6 @@ async function recuperarPeer(
         );
     }
 }
-
 
 // ======================================================
 // CRIAR PEER
@@ -2361,7 +2337,6 @@ function criarPeer(
                 console.log(
                     "ICE gathering completo."
                 );
-
 
                 return;
             }
