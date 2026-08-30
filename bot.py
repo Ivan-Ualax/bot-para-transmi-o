@@ -15,8 +15,18 @@ load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-# TROQUE pela URL do seu Render
-BASE_URL = "https://SEU-PROJETO.onrender.com"
+
+# ======================================================
+# URL DO RENDER
+# ======================================================
+#
+# TROQUE A LINHA ABAIXO PELA URL REAL DO SEU SERVIÇO.
+#
+# Exemplo:
+# BASE_URL = "https://screen-share-abc123.onrender.com"
+#
+
+BASE_URL = "https://bot-para-transmi-o.vercel.app/"
 
 
 # ======================================================
@@ -32,7 +42,7 @@ bot = commands.Bot(
 
 
 # ======================================================
-# BOT ONLINE
+# QUANDO O BOT FICAR ONLINE
 # ======================================================
 
 @bot.event
@@ -43,6 +53,7 @@ async def on_ready():
     print("==============================")
 
     try:
+
         comandos = await bot.tree.sync()
 
         print(
@@ -50,6 +61,7 @@ async def on_ready():
         )
 
     except Exception as erro:
+
         print(
             "Erro ao sincronizar comandos:",
             repr(erro)
@@ -68,7 +80,6 @@ async def criar_sala(
     interaction: discord.Interaction
 ):
 
-    # Responde ao Discord imediatamente
     await interaction.response.defer()
 
     try:
@@ -88,6 +99,11 @@ async def criar_sala(
                 url
             )
 
+
+            # ==========================================
+            # CRIAR SALA NO BACKEND
+            # ==========================================
+
             async with session.post(
                 url
             ) as resposta:
@@ -104,6 +120,7 @@ async def criar_sala(
                     texto
                 )
 
+
                 # ======================================
                 # ERRO HTTP
                 # ======================================
@@ -111,15 +128,16 @@ async def criar_sala(
                 if resposta.status != 200:
 
                     await interaction.followup.send(
-                        f"❌ Não foi possível criar a sala.\n"
-                        f"Status: {resposta.status}"
+                        "❌ Não foi possível criar a sala.\n"
+                        f"Status: {resposta.status}\n"
+                        f"URL: {url}"
                     )
 
                     return
 
 
                 # ======================================
-                # JSON
+                # LER JSON
                 # ======================================
 
                 try:
@@ -129,20 +147,20 @@ async def criar_sala(
                 except Exception as erro:
 
                     print(
-                        "Erro lendo JSON:",
+                        "ERRO JSON:",
                         repr(erro)
                     )
 
                     await interaction.followup.send(
                         "❌ O servidor respondeu, "
-                        "mas a resposta não veio em JSON."
+                        "mas não retornou JSON válido."
                     )
 
                     return
 
 
                 # ======================================
-                # CÓDIGO DA SALA
+                # PEGAR CÓDIGO
                 # ======================================
 
                 codigo = dados.get(
@@ -151,16 +169,21 @@ async def criar_sala(
 
                 if not codigo:
 
+                    print(
+                        "Resposta recebida sem código:",
+                        dados
+                    )
+
                     await interaction.followup.send(
-                        "❌ A sala não retornou "
-                        "um código válido."
+                        "❌ O servidor não retornou "
+                        "o código da sala."
                     )
 
                     return
 
 
                 # ======================================
-                # LINK
+                # CRIAR LINK DA SALA
                 # ======================================
 
                 link = (
@@ -169,7 +192,7 @@ async def criar_sala(
 
 
                 # ======================================
-                # MENSAGEM DISCORD
+                # MENSAGEM
                 # ======================================
 
                 mensagem = (
@@ -188,8 +211,33 @@ async def criar_sala(
 
 
     # ==================================================
-    # ERRO HTTP
+    # ERROS HTTP
     # ==================================================
+
+    except aiohttp.ClientConnectorError as erro:
+
+        print(
+            "ERRO DE CONEXÃO:",
+            repr(erro)
+        )
+
+        await interaction.followup.send(
+            "❌ Não foi possível conectar "
+            "ao servidor do Render."
+        )
+
+
+    except aiohttp.ClientResponseError as erro:
+
+        print(
+            "ERRO DE RESPOSTA:",
+            repr(erro)
+        )
+
+        await interaction.followup.send(
+            "❌ O Render retornou um erro."
+        )
+
 
     except aiohttp.ClientError as erro:
 
@@ -199,8 +247,8 @@ async def criar_sala(
         )
 
         await interaction.followup.send(
-            "❌ Não consegui conectar "
-            "ao servidor do Screen Share."
+            "❌ Erro de comunicação "
+            "com o servidor."
         )
 
 
@@ -216,13 +264,13 @@ async def criar_sala(
         )
 
         await interaction.followup.send(
-            "❌ O servidor demorou demais "
-            "para responder."
+            "❌ O servidor demorou "
+            "demais para responder."
         )
 
 
     # ==================================================
-    # OUTRO ERRO
+    # ERRO GERAL
     # ==================================================
 
     except Exception as erro:
@@ -233,12 +281,13 @@ async def criar_sala(
         )
 
         await interaction.followup.send(
-            "❌ Ocorreu um erro ao criar a sala."
+            "❌ Ocorreu um erro inesperado "
+            "ao criar a sala."
         )
 
 
 # ======================================================
-# VERIFICAR TOKEN
+# VALIDAR TOKEN
 # ======================================================
 
 if not TOKEN:
