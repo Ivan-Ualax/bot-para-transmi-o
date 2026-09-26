@@ -2,7 +2,8 @@ import os
 import uuid
 import random
 import string
-import time
+import json
+import asyncio
 import requests
 
 from fastapi import (
@@ -12,24 +13,72 @@ from fastapi import (
 )
 
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
 
-from fastapi.responses import (
-    FileResponse,
-    JSONResponse,
-)
+from upstash_redis.asyncio import Redis
 
 
 app = FastAPI()
 
 
 # ======================================================
-# CONFIGURAÇÃO DAS SALAS
+# CONFIGURAÇÃO REDIS / UPSTASH
 # ======================================================
 
-salas = {}
+REDIS_URL = os.environ.get("UPSTASH_KV_REST_API_URL")
+REDIS_TOKEN = os.environ.get("UPSTASH_KV_REST_API_TOKEN")
 
-# 10 minutos em segundos
+if not REDIS_URL or not REDIS_TOKEN:
+    print("ERRO: variáveis do Upstash Redis não configuradas.")
+
+redis = Redis(
+    url=REDIS_URL,
+    token=REDIS_TOKEN
+)
+
+
+# ======================================================
+# CONFIGURAÇÕES
+# ======================================================
+
+# Sala vazia desaparece após 10 minutos.
 TEMPO_EXPIRACAO_SALA = 10 * 60
+
+# Presença de cada usuário.
+# O navegador manda ping periodicamente.
+TEMPO_PRESENCA_USUARIO = 90
+
+# WebSockets continuam sendo objetos locais.
+# O Redis faz a ponte entre instâncias.
+sockets_locais = {}
+
+
+# ======================================================
+# CHAVES REDIS
+# ======================================================
+
+def chave_sala(codigo):
+    return f"sala:{codigo}"
+
+
+def chave_usuarios(codigo):
+    return f"sala:{codigo}:usuarios"
+
+
+def chave_transmissoes(codigo):
+    return f"sala:{codigo}:transmissoes"
+
+
+def chave_presenca(codigo, usuario_id):
+    return f"sala:{codigo}:presenca:{usuario_id}"
+
+
+def chave_fila(usuario_id):
+    return f"ws:fila:{usuario_id}"
+
+
+def chave_versao(codigo):
+    return f"sala:{codigo}:versao"
 
 
 # ======================================================
@@ -47,10 +96,6 @@ async def turn_credentials():
         "CLOUDFLARE_TURN_API_TOKEN"
     )
 
-    # ==================================================
-    # VALIDAR VARIÁVEIS
-    # ==================================================
-
     if not turn_key_id or not turn_api_token:
 
         print(
@@ -67,10 +112,6 @@ async def turn_credentials():
             }
         )
 
-    # ==================================================
-    # ENDPOINT CLOUDFLARE
-    # ==================================================
-
     url = (
         "https://rtc.live.cloudflare.com/"
         "v1/turn/keys/"
@@ -78,12 +119,7 @@ async def turn_credentials():
         "credentials/generate-ice-servers"
     )
 
-    # ==================================================
-    # HEADERS
-    # ==================================================
-
     headers = {
-
         "Authorization":
             f"Bearer {turn_api_token}",
 
@@ -103,10 +139,6 @@ async def turn_credentials():
                 "Safari/537.36"
             )
     }
-
-    # ==================================================
-    # CORPO
-    # ==================================================
 
     payload = {
         "ttl": 86400
@@ -131,24 +163,16 @@ async def turn_credentials():
             resposta.status_code
         )
 
-        # ==================================================
-        # ERRO HTTP
-        # ==================================================
-
         if not resposta.ok:
 
             print(
-                "Cloudflare TURN recusou:"
-            )
-
-            print(
+                "Cloudflare TURN recusou:",
                 resposta.text
             )
 
             return JSONResponse(
                 status_code=502,
                 content={
-
                     "erro":
                         "Cloudflare recusou "
                         "a geração TURN.",
@@ -161,10 +185,6 @@ async def turn_credentials():
                 }
             )
 
-        # ==================================================
-        # CONVERTER JSON
-        # ==================================================
-
         try:
 
             dados = resposta.json()
@@ -172,8 +192,7 @@ async def turn_credentials():
         except ValueError as erro:
 
             print(
-                "Resposta Cloudflare "
-                "não é JSON:",
+                "Resposta Cloudflare não é JSON:",
                 repr(erro)
             )
 
@@ -186,29 +205,19 @@ async def turn_credentials():
                 }
             )
 
-        # ==================================================
-        # VALIDAR ICE SERVERS
-        # ==================================================
-
         ice_servers = dados.get(
             "iceServers"
         )
 
         if (
-            not isinstance(
-                ice_servers,
-                list
-            )
+            not isinstance(ice_servers, list)
             or
             len(ice_servers) == 0
         ):
 
             print(
                 "Cloudflare respondeu "
-                "sem iceServers:"
-            )
-
-            print(
+                "sem iceServers:",
                 dados
             )
 
@@ -225,21 +234,11 @@ async def turn_credentials():
             "Cloudflare TURN OK."
         )
 
-        print(
-            "Quantidade de iceServers:",
-            len(ice_servers)
-        )
-
         return JSONResponse(
             content=dados
         )
 
     except requests.Timeout:
-
-        print(
-            "Timeout ao acessar "
-            "Cloudflare TURN."
-        )
 
         return JSONResponse(
             status_code=504,
@@ -253,8 +252,7 @@ async def turn_credentials():
     except requests.ConnectionError as erro:
 
         print(
-            "Erro de conexão "
-            "Cloudflare TURN:",
+            "Erro de conexão Cloudflare:",
             repr(erro)
         )
 
@@ -270,8 +268,7 @@ async def turn_credentials():
     except requests.RequestException as erro:
 
         print(
-            "Erro HTTP "
-            "Cloudflare TURN:",
+            "Erro HTTP Cloudflare:",
             repr(erro)
         )
 
@@ -287,8 +284,7 @@ async def turn_credentials():
     except Exception as erro:
 
         print(
-            "Erro inesperado "
-            "Cloudflare TURN:",
+            "Erro inesperado Cloudflare:",
             repr(erro)
         )
 
@@ -303,7 +299,7 @@ async def turn_credentials():
 
 
 # ======================================================
-# GERAR CÓDIGO DA SALA
+# GERAR CÓDIGO
 # ======================================================
 
 def gerar_codigo_sala(tamanho=6):
@@ -322,55 +318,138 @@ def gerar_codigo_sala(tamanho=6):
 
 
 # ======================================================
-# CONTROLE DE EXPIRAÇÃO
+# VERIFICAR SE SALA EXISTE
 # ======================================================
 
-def sala_expirada(codigo):
+async def sala_existe(codigo):
 
-    sala = salas.get(codigo)
-
-    if not sala:
-        return True
-
-    # Enquanto houver pelo menos uma pessoa,
-    # a sala nunca expira.
-    if len(sala["usuarios"]) > 0:
-        return False
-
-    vazia_desde = sala.get(
-        "vazia_desde"
+    existe = await redis.exists(
+        chave_sala(codigo)
     )
 
-    if vazia_desde is None:
-        return False
+    return bool(existe)
 
-    tempo_vazia = (
-        time.time() - vazia_desde
+
+# ======================================================
+# LIMPAR USUÁRIOS MORTOS
+# ======================================================
+
+async def limpar_usuarios_mortos(codigo):
+
+    usuarios = await redis.hgetall(
+        chave_usuarios(codigo)
     )
 
-    return (
-        tempo_vazia
-        >=
-        TEMPO_EXPIRACAO_SALA
+    if not usuarios:
+        return 0
+
+    removidos = False
+
+    for usuario_id in list(
+        usuarios.keys()
+    ):
+
+        presente = await redis.exists(
+            chave_presenca(
+                codigo,
+                usuario_id
+            )
+        )
+
+        if not presente:
+
+            await redis.hdel(
+                chave_usuarios(codigo),
+                usuario_id
+            )
+
+            await redis.srem(
+                chave_transmissoes(codigo),
+                usuario_id
+            )
+
+            await redis.delete(
+                chave_fila(usuario_id)
+            )
+
+            removidos = True
+
+    if removidos:
+
+        await redis.incr(
+            chave_versao(codigo)
+        )
+
+    usuarios = await redis.hgetall(
+        chave_usuarios(codigo)
+    )
+
+    return len(
+        usuarios or {}
     )
 
 
-def remover_sala_se_expirada(codigo):
+# ======================================================
+# CONTROLAR EXPIRAÇÃO DA SALA
+# ======================================================
 
-    if codigo not in salas:
-        return False
+async def atualizar_expiracao_sala(codigo):
 
-    if not sala_expirada(codigo):
-        return False
+    if not await sala_existe(codigo):
+        return
 
-    print(
-        f"Sala {codigo} encerrada "
-        "por ficar 10 minutos vazia."
+    quantidade = await limpar_usuarios_mortos(
+        codigo
     )
 
-    del salas[codigo]
+    if quantidade == 0:
 
-    return True
+        # Ninguém na sala.
+        # Redis apaga automaticamente após 10 minutos.
+        await redis.expire(
+            chave_sala(codigo),
+            TEMPO_EXPIRACAO_SALA
+        )
+
+        await redis.expire(
+            chave_usuarios(codigo),
+            TEMPO_EXPIRACAO_SALA
+        )
+
+        await redis.expire(
+            chave_transmissoes(codigo),
+            TEMPO_EXPIRACAO_SALA
+        )
+
+        await redis.expire(
+            chave_versao(codigo),
+            TEMPO_EXPIRACAO_SALA
+        )
+
+        print(
+            f"Sala {codigo} vazia. "
+            "Expira em 10 minutos."
+        )
+
+    else:
+
+        # Tem alguém conectado.
+        # Sala não pode expirar.
+        await redis.persist(
+            chave_sala(codigo)
+        )
+
+        await redis.persist(
+            chave_usuarios(codigo)
+        )
+
+        await redis.persist(
+            chave_transmissoes(codigo)
+        )
+
+        await redis.persist(
+            chave_versao(codigo)
+        )
 
 
 # ======================================================
@@ -392,37 +471,35 @@ async def home():
 @app.post("/criar-sala")
 async def criar_sala():
 
-    codigo = gerar_codigo_sala()
+    while True:
 
-    while codigo in salas:
         codigo = gerar_codigo_sala()
 
-    salas[codigo] = {
+        # NX = somente cria se não existir.
+        criada = await redis.set(
+            chave_sala(codigo),
+            "1",
+            ex=TEMPO_EXPIRACAO_SALA,
+            nx=True
+        )
 
-        "usuarios": {},
+        if criada:
+            break
 
-        "transmissoes": {},
-
-        # A sala acabou de ser criada.
-        # Como ainda está vazia, começa aqui
-        # o prazo de 10 minutos.
-        "vazia_desde": time.time()
-
-    }
+    await redis.set(
+        chave_versao(codigo),
+        0,
+        ex=TEMPO_EXPIRACAO_SALA
+    )
 
     print(
-        f"Sala criada: {codigo}"
+        f"Sala criada no Redis: {codigo}"
     )
 
     return JSONResponse(
         content={
-
-            "codigo":
-                codigo,
-
-            "url":
-                f"/sala/{codigo}"
-
+            "codigo": codigo,
+            "url": f"/sala/{codigo}"
         }
     )
 
@@ -438,33 +515,12 @@ async def abrir_sala(
 
     codigo = codigo.upper().strip()
 
-    # ==================================================
-    # A SALA PRECISA TER SIDO CRIADA
-    # ==================================================
-
-    if codigo not in salas:
-
-        print(
-            f"Tentativa de abrir "
-            f"sala inexistente: {codigo}"
-        )
-
-        return FileResponse(
-            "static/sala_inexistente.html",
-            status_code=404
-        )
-
-    # ==================================================
-    # VERIFICAR EXPIRAÇÃO
-    # ==================================================
-
-    if remover_sala_se_expirada(
+    if not await sala_existe(
         codigo
     ):
 
         print(
-            f"Tentativa de abrir "
-            f"sala expirada: {codigo}"
+            f"Sala inexistente: {codigo}"
         )
 
         return FileResponse(
@@ -472,12 +528,19 @@ async def abrir_sala(
             status_code=404
         )
 
-    # IMPORTANTE:
-    #
-    # Apenas abrir a página NÃO cancela o contador.
-    #
-    # O contador só será cancelado quando a pessoa
-    # realmente colocar o nome e conectar no WebSocket.
+    await atualizar_expiracao_sala(
+        codigo
+    )
+
+    # Pode ter expirado durante a limpeza.
+    if not await sala_existe(
+        codigo
+    ):
+
+        return FileResponse(
+            "static/sala_inexistente.html",
+            status_code=404
+        )
 
     return FileResponse(
         "static/sala.html"
@@ -485,140 +548,248 @@ async def abrir_sala(
 
 
 # ======================================================
-# ENVIAR ESTADO DA SALA
+# GERAR ESTADO GLOBAL DA SALA
 # ======================================================
 
-async def enviar_estado_sala(
-    codigo
-):
+async def obter_estado_sala(codigo):
 
-    sala = salas.get(
+    await limpar_usuarios_mortos(
         codigo
     )
 
-    if not sala:
-        return
+    usuarios = await redis.hgetall(
+        chave_usuarios(codigo)
+    )
 
-    estado = {
+    transmissoes = await redis.smembers(
+        chave_transmissoes(codigo)
+    )
 
-        "tipo":
-            "estado",
+    usuarios = usuarios or {}
+    transmissoes = transmissoes or []
 
-        "usuarios": [
+    lista_usuarios = []
 
-            {
+    for usuario_id, nome in usuarios.items():
 
-                "id":
-                    usuario_id,
+        lista_usuarios.append({
+            "id": usuario_id,
+            "nome": nome
+        })
 
-                "nome":
-                    dados["nome"]
+    lista_transmissoes = []
 
-            }
+    for usuario_id in transmissoes:
 
-            for usuario_id, dados
-            in sala[
-                "usuarios"
-            ].items()
+        if usuario_id in usuarios:
 
-        ],
-
-        "transmissoes": [
-
-            {
-
+            lista_transmissoes.append({
                 "usuario_id":
                     usuario_id,
 
                 "nome":
-                    sala[
-                        "usuarios"
-                    ][
+                    usuarios[
                         usuario_id
-                    ][
-                        "nome"
                     ]
+            })
 
-            }
+    return {
+        "tipo":
+            "estado",
 
-            for usuario_id
-            in sala[
-                "transmissoes"
-            ]
+        "usuarios":
+            lista_usuarios,
 
-            if usuario_id
-            in sala[
-                "usuarios"
-            ]
-
-        ]
-
+        "transmissoes":
+            lista_transmissoes
     }
 
-    usuarios_remover = []
 
-    for usuario_id, dados in list(
-        sala[
-            "usuarios"
-        ].items()
-    ):
+# ======================================================
+# ENVIAR ESTADO PARA SOCKET LOCAL
+# ======================================================
+
+async def enviar_estado_socket(
+    websocket,
+    codigo
+):
+
+    estado = await obter_estado_sala(
+        codigo
+    )
+
+    await websocket.send_json(
+        estado
+    )
+
+
+# ======================================================
+# ENVIAR MENSAGEM PARA OUTRO USUÁRIO
+# ======================================================
+
+async def enviar_para_usuario(
+    usuario_id,
+    mensagem
+):
+
+    # Se o usuário estiver na mesma instância,
+    # envia diretamente.
+    socket = sockets_locais.get(
+        usuario_id
+    )
+
+    if socket:
 
         try:
 
-            await dados[
-                "socket"
-            ].send_json(
-                estado
+            await socket.send_json(
+                mensagem
             )
+
+            return
+
+        except Exception:
+
+            sockets_locais.pop(
+                usuario_id,
+                None
+            )
+
+    # Se estiver em outra instância Vercel,
+    # coloca a mensagem na fila Redis.
+    await redis.rpush(
+        chave_fila(usuario_id),
+        json.dumps(mensagem)
+    )
+
+    # Evitar fila abandonada permanente.
+    await redis.expire(
+        chave_fila(usuario_id),
+        TEMPO_PRESENCA_USUARIO
+    )
+
+
+# ======================================================
+# PROCESSAR FILA REDIS DO USUÁRIO
+# ======================================================
+
+async def processar_fila(
+    websocket,
+    usuario_id
+):
+
+    while True:
+
+        try:
+
+            mensagem = await redis.lpop(
+                chave_fila(usuario_id)
+            )
+
+            if mensagem:
+
+                if isinstance(
+                    mensagem,
+                    str
+                ):
+
+                    dados = json.loads(
+                        mensagem
+                    )
+
+                else:
+
+                    dados = mensagem
+
+                await websocket.send_json(
+                    dados
+                )
+
+            else:
+
+                await asyncio.sleep(
+                    0.20
+                )
+
+        except asyncio.CancelledError:
+            break
 
         except Exception as erro:
 
             print(
-                "Erro ao enviar estado "
-                f"para {usuario_id}:",
+                "Erro processando fila:",
                 repr(erro)
             )
 
-            usuarios_remover.append(
-                usuario_id
+            await asyncio.sleep(
+                0.5
             )
 
-    # ==================================================
-    # REMOVER SOCKETS MORTOS
-    # ==================================================
 
-    for usuario_id in usuarios_remover:
+# ======================================================
+# MONITORAR ESTADO GLOBAL
+# ======================================================
 
-        sala[
-            "usuarios"
-        ].pop(
-            usuario_id,
-            None
-        )
+async def monitorar_estado(
+    websocket,
+    codigo
+):
 
-        sala[
-            "transmissoes"
-        ].pop(
-            usuario_id,
-            None
-        )
+    ultima_versao = None
 
-    # Se os sockets mortos eram as últimas pessoas
-    # da sala, começa o contador.
-    if (
-        usuarios_remover
-        and
-        len(sala["usuarios"]) == 0
-        and
-        sala.get("vazia_desde") is None
-    ):
+    while True:
 
-        sala["vazia_desde"] = time.time()
+        try:
 
-        print(
-            f"Sala {codigo} ficou vazia. "
-            "Expira em 10 minutos."
-        )
+            versao = await redis.get(
+                chave_versao(codigo)
+            )
+
+            if versao != ultima_versao:
+
+                ultima_versao = versao
+
+                await enviar_estado_socket(
+                    websocket,
+                    codigo
+                )
+
+            await asyncio.sleep(
+                0.5
+            )
+
+        except asyncio.CancelledError:
+            break
+
+        except Exception as erro:
+
+            print(
+                "Erro monitorando estado:",
+                repr(erro)
+            )
+
+            await asyncio.sleep(
+                1
+            )
+
+
+# ======================================================
+# RENOVAR PRESENÇA
+# ======================================================
+
+async def renovar_presenca(
+    codigo,
+    usuario_id
+):
+
+    await redis.set(
+        chave_presenca(
+            codigo,
+            usuario_id
+        ),
+        "1",
+        ex=TEMPO_PRESENCA_USUARIO
+    )
 
 
 # ======================================================
@@ -636,24 +807,19 @@ async def websocket_sala(
     await websocket.accept()
 
     # ==================================================
-    # NÃO CRIAR SALA PELO WEBSOCKET
+    # SALA PRECISA EXISTIR NO REDIS
     # ==================================================
 
-    if codigo not in salas:
-
-        print(
-            f"WebSocket recusado: "
-            f"sala inexistente {codigo}"
-        )
+    if not await sala_existe(
+        codigo
+    ):
 
         await websocket.send_json({
-
             "tipo":
                 "erro",
 
             "mensagem":
                 "Sala não encontrada."
-
         })
 
         await websocket.close(
@@ -663,41 +829,14 @@ async def websocket_sala(
 
         return
 
-    # ==================================================
-    # VERIFICAR SE EXPIROU
-    # ==================================================
-
-    if remover_sala_se_expirada(
-        codigo
-    ):
-
-        print(
-            f"WebSocket recusado: "
-            f"sala expirada {codigo}"
-        )
-
-        await websocket.send_json({
-
-            "tipo":
-                "erro",
-
-            "mensagem":
-                "Essa sala expirou."
-
-        })
-
-        await websocket.close(
-            code=1008,
-            reason="Sala expirada"
-        )
-
-        return
-
     usuario_id = str(
         uuid.uuid4()
     )
 
     nome = "Usuário"
+
+    tarefa_fila = None
+    tarefa_estado = None
 
     try:
 
@@ -721,33 +860,29 @@ async def websocket_sala(
         if not nome:
 
             await websocket.send_json({
-
                 "tipo":
                     "erro",
 
                 "mensagem":
                     "Nome obrigatório."
-
             })
 
             await websocket.close()
 
             return
 
-        # ==================================================
-        # VERIFICAR NOVAMENTE A SALA
-        # ==================================================
-
-        if codigo not in salas:
+        # Sala pode ter expirado enquanto
+        # a pessoa estava digitando o nome.
+        if not await sala_existe(
+            codigo
+        ):
 
             await websocket.send_json({
-
                 "tipo":
                     "erro",
 
                 "mensagem":
                     "Sala não encontrada."
-
             })
 
             await websocket.close()
@@ -755,74 +890,90 @@ async def websocket_sala(
             return
 
         # ==================================================
-        # REGISTRAR USUÁRIO
+        # REGISTRAR USUÁRIO GLOBALMENTE
         # ==================================================
 
-        salas[
-            codigo
-        ][
-            "usuarios"
-        ][
+        await redis.hset(
+            chave_usuarios(codigo),
+            values={
+                usuario_id: nome
+            }
+        )
+
+        await renovar_presenca(
+            codigo,
             usuario_id
-        ] = {
+        )
 
-            "nome":
-                nome,
+        # Enquanto houver usuário conectado,
+        # a sala não expira.
+        await redis.persist(
+            chave_sala(codigo)
+        )
 
-            "socket":
-                websocket
+        await redis.persist(
+            chave_usuarios(codigo)
+        )
 
-        }
+        await redis.persist(
+            chave_transmissoes(codigo)
+        )
+
+        await redis.persist(
+            chave_versao(codigo)
+        )
+
+        await redis.incr(
+            chave_versao(codigo)
+        )
+
+        # Socket fica somente nesta instância.
+        sockets_locais[
+            usuario_id
+        ] = websocket
 
         # ==================================================
-        # CANCELAR CONTADOR DE EXPIRAÇÃO
-        # ==================================================
-        #
-        # Agora existe alguém realmente conectado.
-        # A sala pode ficar aberta pelo tempo que quiser.
-
-        salas[
-            codigo
-        ][
-            "vazia_desde"
-        ] = None
-
-        # ==================================================
-        # ENVIAR ID
+        # ID DO USUÁRIO
         # ==================================================
 
         await websocket.send_json({
-
             "tipo":
                 "meu_id",
 
             "id":
                 usuario_id
-
         })
 
         print(
-            f"{nome} entrou "
-            f"na sala {codigo}"
+            f"{nome} entrou na sala "
+            f"{codigo}"
         )
 
-        print(
-            "Usuários conectados:",
-            len(
-                salas[
-                    codigo
-                ][
-                    "usuarios"
-                ]
+        # ==================================================
+        # TAREFAS DE SINCRONIZAÇÃO
+        # ==================================================
+
+        tarefa_fila = asyncio.create_task(
+            processar_fila(
+                websocket,
+                usuario_id
             )
         )
 
-        await enviar_estado_sala(
+        tarefa_estado = asyncio.create_task(
+            monitorar_estado(
+                websocket,
+                codigo
+            )
+        )
+
+        await enviar_estado_socket(
+            websocket,
             codigo
         )
 
         # ==================================================
-        # LOOP
+        # LOOP PRINCIPAL
         # ==================================================
 
         while True:
@@ -847,11 +998,14 @@ async def websocket_sala(
 
             if tipo == "ping":
 
-                await websocket.send_json({
+                await renovar_presenca(
+                    codigo,
+                    usuario_id
+                )
 
+                await websocket.send_json({
                     "tipo":
                         "pong"
-
                 })
 
             # ==================================================
@@ -860,21 +1014,25 @@ async def websocket_sala(
 
             elif tipo == "iniciar_transmissao":
 
-                salas[
-                    codigo
-                ][
-                    "transmissoes"
-                ][
+                await renovar_presenca(
+                    codigo,
                     usuario_id
-                ] = True
+                )
+
+                await redis.sadd(
+                    chave_transmissoes(
+                        codigo
+                    ),
+                    usuario_id
+                )
+
+                await redis.incr(
+                    chave_versao(codigo)
+                )
 
                 print(
                     f"{nome} iniciou "
                     "transmissão"
-                )
-
-                await enviar_estado_sala(
-                    codigo
                 )
 
             # ==================================================
@@ -883,13 +1041,15 @@ async def websocket_sala(
 
             elif tipo == "parar_transmissao":
 
-                salas[
-                    codigo
-                ][
-                    "transmissoes"
-                ].pop(
-                    usuario_id,
-                    None
+                await redis.srem(
+                    chave_transmissoes(
+                        codigo
+                    ),
+                    usuario_id
+                )
+
+                await redis.incr(
+                    chave_versao(codigo)
                 )
 
                 print(
@@ -897,12 +1057,8 @@ async def websocket_sala(
                     "transmissão"
                 )
 
-                await enviar_estado_sala(
-                    codigo
-                )
-
             # ==================================================
-            # ASSISTIR TRANSMISSÃO
+            # ASSISTIR
             # ==================================================
 
             elif tipo == "assistir":
@@ -913,69 +1069,41 @@ async def websocket_sala(
                     )
                 )
 
-                print(
-                    f"{nome} quer assistir "
-                    f"{transmissor_id}"
+                if not transmissor_id:
+                    continue
+
+                usuarios = (
+                    await redis.hgetall(
+                        chave_usuarios(
+                            codigo
+                        )
+                    )
+                    or {}
                 )
 
-                if (
-                    transmissor_id
-                    and
-                    codigo in salas
-                    and
-                    transmissor_id
-                    in salas[
-                        codigo
-                    ][
-                        "usuarios"
-                    ]
-                ):
-
-                    print(
-                        "Transmissor encontrado."
-                    )
-
-                    await salas[
-                        codigo
-                    ][
-                        "usuarios"
-                    ][
-                        transmissor_id
-                    ][
-                        "socket"
-                    ].send_json({
-
-                        "tipo":
-                            "novo_espectador",
-
-                        "espectador_id":
-                            usuario_id
-
-                    })
-
-                    print(
-                        "Pedido enviado "
-                        "ao transmissor."
-                    )
-
-                else:
-
-                    print(
-                        "Transmissor "
-                        "não encontrado:",
-                        transmissor_id
-                    )
+                if transmissor_id not in usuarios:
 
                     await websocket.send_json({
-
                         "tipo":
                             "erro",
 
                         "mensagem":
                             "Transmissor "
                             "não encontrado."
-
                     })
+
+                    continue
+
+                await enviar_para_usuario(
+                    transmissor_id,
+                    {
+                        "tipo":
+                            "novo_espectador",
+
+                        "espectador_id":
+                            usuario_id
+                    }
+                )
 
             # ==================================================
             # WEBRTC
@@ -983,81 +1111,44 @@ async def websocket_sala(
             # ==================================================
 
             elif tipo in [
-
                 "offer",
-
                 "answer",
-
                 "ice"
-
             ]:
 
-                destino = (
-                    mensagem.get(
-                        "destino"
-                    )
+                destino = mensagem.get(
+                    "destino"
                 )
 
-                print(
-                    f"{nome} enviou "
-                    f"{tipo} "
-                    f"para {destino}"
-                )
+                if not destino:
+                    continue
 
-                if (
-                    destino
-                    and
-                    codigo in salas
-                    and
-                    destino
-                    in salas[
-                        codigo
-                    ][
-                        "usuarios"
-                    ]
-                ):
-
-                    mensagem[
-                        "origem"
-                    ] = usuario_id
-
-                    try:
-
-                        await salas[
+                usuarios = (
+                    await redis.hgetall(
+                        chave_usuarios(
                             codigo
-                        ][
-                            "usuarios"
-                        ][
-                            destino
-                        ][
-                            "socket"
-                        ].send_json(
-                            mensagem
                         )
+                    )
+                    or {}
+                )
 
-                        print(
-                            f"{tipo} encaminhado."
-                        )
-
-                    except Exception as erro:
-
-                        print(
-                            "Erro encaminhando "
-                            f"{tipo}:",
-                            repr(erro)
-                        )
-
-                else:
+                if destino not in usuarios:
 
                     print(
-                        "Destino "
-                        "não encontrado:",
+                        "Destino não encontrado:",
                         destino
                     )
 
-            # ==================================================
-            # EVENTO DESCONHECIDO
-            # ==================================================
+                    continue
+
+                mensagem[
+                    "origem"
+                ] = usuario_id
+
+                await enviar_para_usuario(
+                    destino,
+                    mensagem
+                )
 
             else:
 
@@ -1094,37 +1185,57 @@ async def websocket_sala(
 
     finally:
 
-        if codigo in salas:
+        if tarefa_fila:
 
-            salas[
-                codigo
-            ][
-                "usuarios"
-            ].pop(
-                usuario_id,
-                None
+            tarefa_fila.cancel()
+
+        if tarefa_estado:
+
+            tarefa_estado.cancel()
+
+        sockets_locais.pop(
+            usuario_id,
+            None
+        )
+
+        try:
+
+            await redis.hdel(
+                chave_usuarios(codigo),
+                usuario_id
             )
 
-            salas[
-                codigo
-            ][
-                "transmissoes"
-            ].pop(
-                usuario_id,
-                None
+            await redis.srem(
+                chave_transmissoes(codigo),
+                usuario_id
+            )
+
+            await redis.delete(
+                chave_presenca(
+                    codigo,
+                    usuario_id
+                )
+            )
+
+            await redis.delete(
+                chave_fila(
+                    usuario_id
+                )
+            )
+
+            await redis.incr(
+                chave_versao(codigo)
+            )
+
+            usuarios_restantes = (
+                await limpar_usuarios_mortos(
+                    codigo
+                )
             )
 
             print(
                 f"{nome} removido "
                 f"da sala {codigo}"
-            )
-
-            usuarios_restantes = len(
-                salas[
-                    codigo
-                ][
-                    "usuarios"
-                ]
             )
 
             print(
@@ -1133,24 +1244,51 @@ async def websocket_sala(
             )
 
             # ==================================================
-            # ÚLTIMA PESSOA SAIU
+            # SALA FICOU VAZIA
             # ==================================================
 
-            if usuarios_restantes == 0:
+            if (
+                usuarios_restantes == 0
+                and
+                await sala_existe(codigo)
+            ):
 
-                salas[
-                    codigo
-                ][
-                    "vazia_desde"
-                ] = time.time()
+                await redis.expire(
+                    chave_sala(codigo),
+                    TEMPO_EXPIRACAO_SALA
+                )
+
+                await redis.expire(
+                    chave_usuarios(codigo),
+                    TEMPO_EXPIRACAO_SALA
+                )
+
+                await redis.expire(
+                    chave_transmissoes(codigo),
+                    TEMPO_EXPIRACAO_SALA
+                )
+
+                await redis.expire(
+                    chave_versao(codigo),
+                    TEMPO_EXPIRACAO_SALA
+                )
 
                 print(
                     f"Sala {codigo} ficou vazia. "
                     "Expira em 10 minutos."
                 )
 
-            await enviar_estado_sala(
-                codigo
+            elif usuarios_restantes > 0:
+
+                await redis.persist(
+                    chave_sala(codigo)
+                )
+
+        except Exception as erro:
+
+            print(
+                "Erro durante limpeza:",
+                repr(erro)
             )
 
 
