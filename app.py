@@ -413,22 +413,14 @@ async def abrir_sala(
     codigo = codigo.upper()
 
 
+    # A sala só pode ser criada pelo endpoint POST /criar-sala.
+    # Abrir um link nunca deve criar uma nova sala.
     if codigo not in salas:
-
-        salas[codigo] = {
-
-            "usuarios": {},
-
-            "transmissoes": {}
-
-        }
-
-
-        print(
-            f"Sala criada ao abrir link: "
-            f"{codigo}"
+        print(f"Tentativa de abrir sala inexistente: {codigo}")
+        return FileResponse(
+            "static/sala_inexistente.html",
+            status_code=404
         )
-
 
     return FileResponse(
         "static/sala.html"
@@ -578,15 +570,16 @@ async def websocket_sala(
     await websocket.accept()
 
 
+    # WebSocket não cria sala. Ele apenas entra em uma sala
+    # previamente criada por POST /criar-sala.
     if codigo not in salas:
-
-        salas[codigo] = {
-
-            "usuarios": {},
-
-            "transmissoes": {}
-
-        }
+        print(f"WebSocket recusado: sala inexistente {codigo}")
+        await websocket.send_json({
+            "tipo": "erro",
+            "mensagem": "Sala não encontrada."
+        })
+        await websocket.close(code=1008, reason="Sala não encontrada")
+        return
 
 
     usuario_id = str(
