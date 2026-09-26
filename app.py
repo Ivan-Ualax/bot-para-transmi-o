@@ -2,6 +2,7 @@ import os
 import uuid
 import random
 import string
+import time
 import requests
 
 from fastapi import (
@@ -20,11 +21,15 @@ from fastapi.responses import (
 
 app = FastAPI()
 
+
 # ======================================================
-# SALAS EM MEMÓRIA
+# CONFIGURAÇÃO DAS SALAS
 # ======================================================
 
 salas = {}
+
+# 10 minutos em segundos
+TEMPO_EXPIRACAO_SALA = 10 * 60
 
 
 # ======================================================
@@ -225,10 +230,6 @@ async def turn_credentials():
             len(ice_servers)
         )
 
-        # Não imprimir username/credential.
-        # Essas credenciais são temporárias,
-        # mas não precisam aparecer nos logs.
-
         return JSONResponse(
             content=dados
         )
@@ -305,9 +306,7 @@ async def turn_credentials():
 # GERAR CÓDIGO DA SALA
 # ======================================================
 
-def gerar_codigo_sala(
-    tamanho=6
-):
+def gerar_codigo_sala(tamanho=6):
 
     caracteres = (
         string.ascii_uppercase +
@@ -323,26 +322,55 @@ def gerar_codigo_sala(
 
 
 # ======================================================
-# CRIAR / RECUPERAR ESTADO DA SALA
+# CONTROLE DE EXPIRAÇÃO
 # ======================================================
 
-def garantir_sala(codigo):
+def sala_expirada(codigo):
 
-    codigo = codigo.upper().strip()
+    sala = salas.get(codigo)
+
+    if not sala:
+        return True
+
+    # Enquanto houver pelo menos uma pessoa,
+    # a sala nunca expira.
+    if len(sala["usuarios"]) > 0:
+        return False
+
+    vazia_desde = sala.get(
+        "vazia_desde"
+    )
+
+    if vazia_desde is None:
+        return False
+
+    tempo_vazia = (
+        time.time() - vazia_desde
+    )
+
+    return (
+        tempo_vazia
+        >=
+        TEMPO_EXPIRACAO_SALA
+    )
+
+
+def remover_sala_se_expirada(codigo):
 
     if codigo not in salas:
+        return False
 
-        print(
-            f"Sala {codigo} não está na memória. "
-            "Criando/reconstruindo estado."
-        )
+    if not sala_expirada(codigo):
+        return False
 
-        salas[codigo] = {
-            "usuarios": {},
-            "transmissoes": {}
-        }
+    print(
+        f"Sala {codigo} encerrada "
+        "por ficar 10 minutos vazia."
+    )
 
-    return salas[codigo]
+    del salas[codigo]
+
+    return True
 
 
 # ======================================================
@@ -367,14 +395,18 @@ async def criar_sala():
     codigo = gerar_codigo_sala()
 
     while codigo in salas:
-
         codigo = gerar_codigo_sala()
 
     salas[codigo] = {
 
         "usuarios": {},
 
-        "transmissoes": {}
+        "transmissoes": {},
+
+        # A sala acabou de ser criada.
+        # Como ainda está vazia, começa aqui
+        # o prazo de 10 minutos.
+        "vazia_desde": time.time()
 
     }
 
@@ -406,23 +438,46 @@ async def abrir_sala(
 
     codigo = codigo.upper().strip()
 
+    # ==================================================
+    # A SALA PRECISA TER SIDO CRIADA
+    # ==================================================
+
+    if codigo not in salas:
+
+        print(
+            f"Tentativa de abrir "
+            f"sala inexistente: {codigo}"
+        )
+
+        return FileResponse(
+            "static/sala_inexistente.html",
+            status_code=404
+        )
+
+    # ==================================================
+    # VERIFICAR EXPIRAÇÃO
+    # ==================================================
+
+    if remover_sala_se_expirada(
+        codigo
+    ):
+
+        print(
+            f"Tentativa de abrir "
+            f"sala expirada: {codigo}"
+        )
+
+        return FileResponse(
+            "static/sala_inexistente.html",
+            status_code=404
+        )
+
     # IMPORTANTE:
     #
-    # Na Vercel a memória do processo pode desaparecer.
+    # Apenas abrir a página NÃO cancela o contador.
     #
-    # Se o código não estiver mais em `salas`, reconstruímos
-    # o estado utilizando EXATAMENTE o mesmo código/link.
-    #
-    # Exemplo:
-    #
-    # /sala/ABC123
-    #
-    # continuará abrindo ABC123 mesmo se a instância anterior
-    # da Vercel tiver sido encerrada.
-
-    garantir_sala(
-        codigo
-    )
+    # O contador só será cancelado quando a pessoa
+    # realmente colocar o nome e conectar no WebSocket.
 
     return FileResponse(
         "static/sala.html"
@@ -442,7 +497,6 @@ async def enviar_estado_sala(
     )
 
     if not sala:
-
         return
 
     estado = {
@@ -529,6 +583,10 @@ async def enviar_estado_sala(
                 usuario_id
             )
 
+    # ==================================================
+    # REMOVER SOCKETS MORTOS
+    # ==================================================
+
     for usuario_id in usuarios_remover:
 
         sala[
@@ -545,6 +603,23 @@ async def enviar_estado_sala(
             None
         )
 
+    # Se os sockets mortos eram as últimas pessoas
+    # da sala, começa o contador.
+    if (
+        usuarios_remover
+        and
+        len(sala["usuarios"]) == 0
+        and
+        sala.get("vazia_desde") is None
+    ):
+
+        sala["vazia_desde"] = time.time()
+
+        print(
+            f"Sala {codigo} ficou vazia. "
+            "Expira em 10 minutos."
+        )
+
 
 # ======================================================
 # WEBSOCKET
@@ -558,23 +633,65 @@ async def websocket_sala(
 
     codigo = codigo.upper().strip()
 
-    # ==================================================
-    # GARANTIR MESMO CÓDIGO DE SALA
-    # ==================================================
-    #
-    # Se a Vercel tiver perdido o dicionário em memória,
-    # reconstruímos a sala com o MESMO código.
-    #
-    # Digitar o nome NÃO gera um novo código.
-    #
-    # /ws/ABC123 continuará sendo ABC123.
-    # ==================================================
-
-    garantir_sala(
-        codigo
-    )
-
     await websocket.accept()
+
+    # ==================================================
+    # NÃO CRIAR SALA PELO WEBSOCKET
+    # ==================================================
+
+    if codigo not in salas:
+
+        print(
+            f"WebSocket recusado: "
+            f"sala inexistente {codigo}"
+        )
+
+        await websocket.send_json({
+
+            "tipo":
+                "erro",
+
+            "mensagem":
+                "Sala não encontrada."
+
+        })
+
+        await websocket.close(
+            code=1008,
+            reason="Sala não encontrada"
+        )
+
+        return
+
+    # ==================================================
+    # VERIFICAR SE EXPIROU
+    # ==================================================
+
+    if remover_sala_se_expirada(
+        codigo
+    ):
+
+        print(
+            f"WebSocket recusado: "
+            f"sala expirada {codigo}"
+        )
+
+        await websocket.send_json({
+
+            "tipo":
+                "erro",
+
+            "mensagem":
+                "Essa sala expirou."
+
+        })
+
+        await websocket.close(
+            code=1008,
+            reason="Sala expirada"
+        )
+
+        return
 
     usuario_id = str(
         uuid.uuid4()
@@ -618,6 +735,26 @@ async def websocket_sala(
             return
 
         # ==================================================
+        # VERIFICAR NOVAMENTE A SALA
+        # ==================================================
+
+        if codigo not in salas:
+
+            await websocket.send_json({
+
+                "tipo":
+                    "erro",
+
+                "mensagem":
+                    "Sala não encontrada."
+
+            })
+
+            await websocket.close()
+
+            return
+
+        # ==================================================
         # REGISTRAR USUÁRIO
         # ==================================================
 
@@ -636,6 +773,19 @@ async def websocket_sala(
                 websocket
 
         }
+
+        # ==================================================
+        # CANCELAR CONTADOR DE EXPIRAÇÃO
+        # ==================================================
+        #
+        # Agora existe alguém realmente conectado.
+        # A sala pode ficar aberta pelo tempo que quiser.
+
+        salas[
+            codigo
+        ][
+            "vazia_desde"
+        ] = None
 
         # ==================================================
         # ENVIAR ID
@@ -771,6 +921,8 @@ async def websocket_sala(
                 if (
                     transmissor_id
                     and
+                    codigo in salas
+                    and
                     transmissor_id
                     in salas[
                         codigo
@@ -854,6 +1006,8 @@ async def websocket_sala(
 
                 if (
                     destino
+                    and
+                    codigo in salas
                     and
                     destino
                     in salas[
@@ -965,27 +1119,35 @@ async def websocket_sala(
                 f"da sala {codigo}"
             )
 
-            print(
-                "Usuários restantes:",
-                len(
-                    salas[
-                        codigo
-                    ][
-                        "usuarios"
-                    ]
-                )
+            usuarios_restantes = len(
+                salas[
+                    codigo
+                ][
+                    "usuarios"
+                ]
             )
 
-            # IMPORTANTE:
-            #
-            # NÃO fazemos:
-            #
-            # del salas[codigo]
-            #
-            # quando o último usuário sai.
-            #
-            # Enquanto essa instância da Vercel estiver viva,
-            # o código continua registrado.
+            print(
+                "Usuários restantes:",
+                usuarios_restantes
+            )
+
+            # ==================================================
+            # ÚLTIMA PESSOA SAIU
+            # ==================================================
+
+            if usuarios_restantes == 0:
+
+                salas[
+                    codigo
+                ][
+                    "vazia_desde"
+                ] = time.time()
+
+                print(
+                    f"Sala {codigo} ficou vazia. "
+                    "Expira em 10 minutos."
+                )
 
             await enviar_estado_sala(
                 codigo
